@@ -2,7 +2,7 @@
 
 Akan **CDR (Call Detail Record)** verisinden **gerçek zamanlı fraud (dolandırıcılık) tespiti** yapan, Go ile yazılmış event-driven bir sistem. Telekomda genelde pahalı, kapalı-kutu kurumsal ürünlerle çözülen bir problemin çekirdeğini Kafka ve temiz mikroservislerle açık şekilde çözer.
 
-> 🚧 **Aktif geliştirme.** Şu an çalışan: **velocity + impossible-travel** kuralları (gRPC enrichment'lı) — uçtan uca, testli, CI'lı.
+> 🚧 **Aktif geliştirme.** Şu an çalışan: **3 fraud kuralı** (velocity · impossible-travel · IRSF, gRPC enrichment'lı) — uçtan uca, testli, CI'lı.
 
 ## Durum
 
@@ -11,27 +11,27 @@ Akan **CDR (Call Detail Record)** verisinden **gerçek zamanlı fraud (dolandır
 | Event-driven pipeline (Kafka, KRaft) | ✅ |
 | Velocity kuralı (Redis kayan pencere) | ✅ |
 | Impossible-travel kuralı (Haversine + son-konum) | ✅ |
+| IRSF kuralı (premium harcama penceresi) | ✅ |
 | gRPC enrichment (subscriber-service) | ✅ |
 | Idempotency + manuel offset commit | ✅ |
 | Flag'leri HTTP'de sunma (`read-api`) | ✅ |
 | CI (gofmt · build · vet · test) | ✅ |
-| IRSF kuralı | 🔜 Faz 3 |
 | Gözlemlenebilirlik (Prometheus/Grafana) | 🔜 Faz 4 |
 
 ## Nasıl çalışır
 
 ```
 generator ──▶ Kafka (cdr.raw) ──▶ fraud ──▶ Kafka (cdr.fraud.alert) ──▶ read-api ──▶ HTTP
- sentetik      3 partition        │  velocity + impossible-travel        Postgres      /alerts
- CDR + fraud   msisdn-key'li      └── gRPC ──▶ subscriber (cell → geo)   (idempotent)
+ sentetik      3 partition        │  velocity · impossible-travel · IRSF   Postgres      /alerts
+ CDR + fraud   msisdn-key'li      └── gRPC ──▶ subscriber (cell→geo, tarife) (idempotent)
  senaryoları
 ```
 
 | Servis | Görev |
 |---|---|
-| **generator** | Sentetik CDR üretir + periyodik fraud senaryoları (velocity burst, impossible-travel) enjekte eder |
-| **fraud** | `cdr.raw`'ı tüketir; **velocity** (Redis kayan pencere) ve **impossible-travel** (gRPC ile hücre→coğrafya + Redis son-konum) kurallarını uygular; alert üretir |
-| **subscriber** | gRPC referans servisi — hücre→coğrafya (`GetCell`) sunar; fraud senkron enrichment için çağırır |
+| **generator** | Sentetik CDR üretir + periyodik fraud senaryoları (velocity burst, impossible-travel, IRSF) enjekte eder |
+| **fraud** | `cdr.raw`'ı tüketir; **velocity**, **impossible-travel** ve **IRSF** (premium harcama penceresi) kurallarını uygular; abone başına dedup'lı alert üretir |
+| **subscriber** | gRPC referans servisi — hücre→coğrafya (`GetCell`) ve destinasyon tarifesi (`GetTariff`) sunar; fraud enrichment için çağırır |
 | **read-api** | Alert'leri Postgres'e (idempotent) yazar; `GET /alerts`, `GET /healthz` sunar |
 
 Altyapı: **Kafka (KRaft)** · **Postgres** · **Redis**.
