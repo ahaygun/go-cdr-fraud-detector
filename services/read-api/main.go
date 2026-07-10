@@ -39,6 +39,8 @@ func main() {
 	dsn := platform.Getenv("POSTGRES_DSN", "postgres://cdr:cdr@localhost:5432/cdr?sslmode=disable")
 	log.Info("starting", "http_addr", httpAddr, "kafka_brokers", brokers)
 
+	go platform.ServeMetrics(ctx, platform.Getenv("METRICS_ADDR", ":9100"), log)
+
 	pool, err := connectDB(ctx, dsn)
 	if err != nil {
 		log.Error("db connect failed", "err", err)
@@ -135,6 +137,7 @@ func consumeAlerts(ctx context.Context, log *slog.Logger, brokers []string, pool
 		if err := reader.CommitMessages(ctx, m); err != nil && ctx.Err() == nil {
 			log.Error("commit failed", "err", err)
 		}
+		alertsStored.Inc()
 		log.Info("alert stored", "caller", alert.CallerMSISDN, "rule", alert.Rule, "score", alert.Score)
 	}
 }

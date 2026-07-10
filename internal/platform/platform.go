@@ -5,10 +5,15 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // NewLogger returns a JSON structured logger tagged with the service name so
@@ -30,4 +35,25 @@ func Getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// ServeMetrics serves Prometheus metrics on addr at /metrics until ctx is
+// cancelled. Call it in a goroutine; metrics are read from the default registry
+// (where promauto-registered counters live).
+func ServeMetrics(ctx context.Context, addr string, log *slog.Logger) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+
+	go func() {
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(sctx)
+	}()
+
+	log.Info("metrics listening", "addr", addr)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Error("metrics server error", "err", err)
+	}
 }

@@ -63,6 +63,8 @@ func main() {
 		"impossible_travel_max_kmh", travel.MaxSpeedKmh, "irsf_threshold", irsf.SpendThreshold,
 		"alert_cooldown", alertCooldown.String())
 
+	go platform.ServeMetrics(ctx, platform.Getenv("METRICS_ADDR", ":9100"), log)
+
 	if err := stream.EnsureTopics(ctx, brokers,
 		stream.TopicSpec{Name: cdr.TopicRaw, Partitions: 3},
 		stream.TopicSpec{Name: cdr.TopicAlert, Partitions: 3},
@@ -127,6 +129,7 @@ func main() {
 				}
 			}
 		}
+		cdrProcessed.Inc()
 
 		if err := reader.CommitMessages(ctx, m); err != nil && ctx.Err() == nil {
 			log.Error("commit failed", "err", err)
@@ -286,6 +289,7 @@ func (p *processor) emit(ctx context.Context, rec cdr.CDR, rule string, score fl
 		return err
 	}
 	p.log.Warn("FRAUD", "rule", rule, "caller", rec.CallerMSISDN, "score", score, "evidence", evidence)
+	fraudAlerts.WithLabelValues(rule).Inc()
 	return nil
 }
 

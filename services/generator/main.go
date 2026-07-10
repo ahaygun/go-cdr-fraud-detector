@@ -49,6 +49,8 @@ func main() {
 		"burst_every", burstEvery.String(), "travel_every", travelEvery.String(),
 		"irsf_every", irsfEvery.String())
 
+	go platform.ServeMetrics(ctx, platform.Getenv("METRICS_ADDR", ":9100"), log)
+
 	if err := stream.EnsureTopics(ctx, brokers,
 		stream.TopicSpec{Name: cdr.TopicRaw, Partitions: 3},
 		stream.TopicSpec{Name: cdr.TopicAlert, Partitions: 3},
@@ -115,9 +117,13 @@ func emit(ctx context.Context, log *slog.Logger, w *kafka.Writer, rec cdr.CDR) {
 		return
 	}
 	// Key = caller_msisdn → same subscriber always lands on the same partition.
-	if err := w.WriteMessages(ctx, kafka.Message{Key: []byte(rec.CallerMSISDN), Value: val}); err != nil && ctx.Err() == nil {
-		log.Error("write failed", "err", err)
+	if err := w.WriteMessages(ctx, kafka.Message{Key: []byte(rec.CallerMSISDN), Value: val}); err != nil {
+		if ctx.Err() == nil {
+			log.Error("write failed", "err", err)
+		}
+		return
 	}
+	cdrProduced.Inc()
 }
 
 func cdrFrom(caller, callee, cellID string) cdr.CDR {
