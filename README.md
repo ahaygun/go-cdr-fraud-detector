@@ -48,9 +48,11 @@ make up        # her şeyi tek komutla ayağa kaldırır
 
 ```bash
 curl -s localhost:8090/alerts
-# {"count":4,"alerts":[
+# {"count":N,"alerts":[
 #   {"caller_msisdn":"+905...","rule":"velocity",
-#    "evidence":"12 calls within 60s (threshold 12)","score":1, ...}
+#    "evidence":"12 calls within 60s (threshold 12)", ...},
+#   {"caller_msisdn":"+905...","rule":"impossible_travel",
+#    "evidence":"7930 km in 1s → 28548026 km/h (max 1000)", ...}
 # ]}
 ```
 
@@ -65,6 +67,7 @@ make down      # her şeyi kapat
 - **Idempotency:** kayan pencerenin ZSET üyesi `record_id` olduğundan tekrar teslim edilen olay sayacı şişirmez; alert'ler Postgres'e `ON CONFLICT DO NOTHING` ile yazılır.
 - **Manuel commit:** offset yalnızca işlem bittikten sonra ilerler → _at-least-once_ teslim + idempotency = pratikte _effectively-once_.
 - **Senkron enrichment (gRPC):** impossible-travel için fraud, her çağrının hücre koordinatını `subscriber-service`'ten gRPC ile (timeout'lu) çeker. subscriber-service düşse bile velocity ve pipeline çalışmaya devam eder — enrichment zarifçe devre dışı kalır (graceful degradation).
+- **Alert de-dup:** aynı abone + kural için pencere başına en fazla bir alert (Redis cooldown bayrağı) → bir burst 4-5 değil, **tek** alert üretir. Bayrak yalnızca başarılı emit'ten sonra konur, böylece emit hatası retry'da kaybolmaz.
 
 ## Geliştirme
 
