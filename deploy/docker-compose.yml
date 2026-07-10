@@ -95,6 +95,7 @@ services:
       VELOCITY_THRESHOLD: "12"
       SUBSCRIBER_ADDR: subscriber:50051
       IMPOSSIBLE_TRAVEL_MAX_KMH: "1000"
+      ALERT_COOLDOWN_SEC: "60" # at most one alert per subscriber per rule per window
     depends_on:
       kafka:
         condition: service_healthy

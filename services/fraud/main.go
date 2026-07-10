@@ -7,8 +7,10 @@
 //
 // Correctness baseline: partitioned by caller_msisdn, MANUAL offset commit,
 // idempotent processing (record_id dedup + record_id as the window member).
-// The gRPC enrichment degrades gracefully: if subscriber-service is down,
-// impossible-travel is skipped but velocity and the pipeline keep running.
+// Alerts are de-duplicated per subscriber per window (one alert, not one per
+// offending call). gRPC enrichment degrades gracefully: if subscriber-service
+// is unavailable, impossible-travel is skipped but velocity and the pipeline
+// keep running.
 package main
 
 import (
@@ -50,9 +52,11 @@ func main() {
 	travel := rules.ImpossibleTravel{
 		MaxSpeedKmh: float64(atoi(platform.Getenv("IMPOSSIBLE_TRAVEL_MAX_KMH", "1000"))),
 	}
+	alertCooldown := time.Duration(atoi(platform.Getenv("ALERT_COOLDOWN_SEC", "60"))) * time.Second
+
 	log.Info("starting", "kafka_brokers", brokers, "redis_addr", redisAddr,
 		"subscriber_addr", subscriberAddr, "velocity_threshold", vel.Threshold,
-		"impossible_travel_max_kmh", travel.MaxSpeedKmh)
+		"impossible_travel_max_kmh", travel.MaxSpeedKmh, "alert_cooldown", alertCooldown.String())
 
 	if err := stream.EnsureTopics(ctx, brokers,
 		stream.TopicSpec{Name: cdr.TopicRaw, Partitions: 3},
@@ -79,14 +83,15 @@ func main() {
 	defer writer.Close()
 
 	p := &processor{
-		log:      log,
-		rdb:      rdb,
-		ref:      ref,
-		writer:   writer,
-		vel:      vel,
-		travel:   travel,
-		windowMs: int64(vel.WindowSeconds) * 1000,
-		seenTTL:  time.Duration(vel.WindowSeconds*3) * time.Second,
+		log:           log,
+		rdb:           rdb,
+		ref:           ref,
+		writer:        writer,
+		vel:           vel,
+		travel:        travel,
+		windowMs:      int64(vel.WindowSeconds) * 1000,
+		seenTTL:       time.Duration(vel.WindowSeconds*3) * time.Second,
+		alertCooldown: alertCooldown,
 	}
 
 	log.Info("consuming", "topic", cdr.TopicRaw)
@@ -123,14 +128,15 @@ func main() {
 }
 
 type processor struct {
-	log      *slog.Logger
-	rdb      *redis.Client
-	ref      cdrv1.ReferenceClient
-	writer   *kafka.Writer
-	vel      rules.Velocity
-	travel   rules.ImpossibleTravel
-	windowMs int64
-	seenTTL  time.Duration
+	log           *slog.Logger
+	rdb           *redis.Client
+	ref           cdrv1.ReferenceClient
+	writer        *kafka.Writer
+	vel           rules.Velocity
+	travel        rules.ImpossibleTravel
+	windowMs      int64
+	seenTTL       time.Duration
+	alertCooldown time.Duration
 }
 
 func (p *processor) handle(ctx context.Context, value []byte) error {
@@ -148,15 +154,11 @@ func (p *processor) handle(ctx context.Context, value []byte) error {
 		return nil
 	}
 
-	// Rule 1 — velocity: self-contained, no external dependency.
 	if err := p.checkVelocity(ctx, rec); err != nil {
 		return err
 	}
-
-	// Rule 2 — impossible-travel: needs gRPC enrichment. Degrade gracefully so
-	// a subscriber-service blip never blocks velocity or the pipeline.
 	if err := p.checkImpossibleTravel(ctx, rec); err != nil {
-		p.log.Warn("impossible-travel check skipped", "err", err, "caller", rec.CallerMSISDN)
+		return err
 	}
 
 	return markSeen(ctx, p.rdb, rec.RecordID, p.seenTTL)
@@ -169,47 +171,64 @@ func (p *processor) checkVelocity(ctx context.Context, rec cdr.CDR) error {
 		return err
 	}
 	if triggered, score, evidence := p.vel.Evaluate(count); triggered {
-		return p.emit(ctx, rec, cdr.RuleVelocity, score, evidence)
+		return p.maybeEmit(ctx, rec, cdr.RuleVelocity, score, evidence)
 	}
 	return nil
 }
 
 func (p *processor) checkImpossibleTravel(ctx context.Context, rec cdr.CDR) error {
 	// Synchronous enrichment: fetch the current cell's coordinates over gRPC.
+	// If the enrichment service is unavailable, skip this rule (graceful
+	// degradation) — velocity and the pipeline are unaffected.
 	cctx, cancel := context.WithTimeout(ctx, grpcTimeout)
 	defer cancel()
 	cell, err := p.ref.GetCell(cctx, &cdrv1.GetCellRequest{CellId: rec.CellID})
 	if err != nil {
-		return err
+		p.log.Warn("impossible-travel skipped: enrichment unavailable", "err", err, "caller", rec.CallerMSISDN)
+		return nil
 	}
 
+	current := lastLoc{Lat: cell.GetLat(), Lon: cell.GetLon(), At: rec.StartTime}
 	last, ok, err := getLastLocation(ctx, p.rdb, rec.CallerMSISDN)
 	if err != nil {
 		return err
 	}
-	current := lastLoc{Lat: cell.GetLat(), Lon: cell.GetLon(), At: rec.StartTime}
 
-	var triggered bool
-	var score float64
-	var evidence string
 	if ok {
 		dist := geo.HaversineKm(last.Lat, last.Lon, current.Lat, current.Lon)
 		dt := current.At.Sub(last.At)
 		if dt < 0 {
 			dt = -dt
 		}
-		triggered, score, evidence = p.travel.Evaluate(dist, dt)
+		if triggered, score, evidence := p.travel.Evaluate(dist, dt); triggered {
+			// Emit BEFORE advancing the stored location, so a failed emit can be
+			// retried against the same prior location instead of being lost.
+			if err := p.maybeEmit(ctx, rec, cdr.RuleImpossibleTravel, score, evidence); err != nil {
+				return err
+			}
+		}
 	}
 
-	// Advance the last-known location regardless of the emit outcome.
-	if err := setLastLocation(ctx, p.rdb, rec.CallerMSISDN, current, lastLocTTL); err != nil {
+	return setLastLocation(ctx, p.rdb, rec.CallerMSISDN, current, lastLocTTL)
+}
+
+// maybeEmit emits a fraud alert, but at most once per (rule, subscriber) within
+// the cooldown window — so a burst yields one alert, not one per offending call.
+// The cooldown flag is set only AFTER a successful emit, so the emit stays safe
+// to retry (the sink also de-duplicates on record_id + rule).
+func (p *processor) maybeEmit(ctx context.Context, rec cdr.CDR, rule string, score float64, evidence string) error {
+	key := "alerted:" + rule + ":" + rec.CallerMSISDN
+	n, err := p.rdb.Exists(ctx, key).Result()
+	if err != nil {
 		return err
 	}
-
-	if triggered {
-		return p.emit(ctx, rec, cdr.RuleImpossibleTravel, score, evidence)
+	if n > 0 {
+		return nil // already alerted this subscriber for this rule in the window
 	}
-	return nil
+	if err := p.emit(ctx, rec, rule, score, evidence); err != nil {
+		return err
+	}
+	return p.rdb.Set(ctx, key, 1, p.alertCooldown).Err()
 }
 
 func (p *processor) emit(ctx context.Context, rec cdr.CDR, rule string, score float64, evidence string) error {
