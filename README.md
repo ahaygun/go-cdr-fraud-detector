@@ -1,156 +1,188 @@
 # go-cdr-fraud-detector
 
-Akan **CDR (Call Detail Record)** verisinden **gerçek zamanlı fraud (dolandırıcılık) tespiti** yapan, Go ile yazılmış event-driven bir sistem. Telekomda genelde pahalı, kapalı-kutu kurumsal ürünlerle çözülen bir problemin çekirdeğini Kafka ve temiz mikroservislerle açık şekilde çözer.
+*English · [Türkçe](README.tr.md)*
 
-> 🚧 **Aktif geliştirme.** Şu an çalışan: **3 fraud kuralı** (velocity · impossible-travel · IRSF, gRPC enrichment'lı) — uçtan uca, testli, CI'lı.
+Real-time **telecom fraud detection** over a stream of Call Detail Records
+(CDRs), written in Go. An event-driven pipeline ingests calls from Kafka and runs
+three independent fraud rules over them — flagging suspicious activity within
+milliseconds — behind clean, separately-deployable microservices.
 
-## Durum
+> Telcos usually detect fraud with expensive, closed-box enterprise systems.
+> This project is an open, Go-native take on the core of that problem:
+> catch fraud in live CDR traffic, cleanly and observably.
 
-| Yetenek | Durum |
+## Features
+
+- **Event-driven pipeline** — a generator produces CDRs onto Kafka; independent
+  consumers process them. Producers and consumers are decoupled, so the fraud
+  service scales and fails on its own.
+- **Three fraud rules, three techniques** — not three threshold checks:
+  **velocity** (stream windowing), **impossible-travel** (stateful last-known
+  location), and **IRSF** (enrichment + a spend window). Each targets a real,
+  distinct fraud type.
+- **Synchronous gRPC enrichment** — the fraud service enriches each record via a
+  gRPC reference service (cell → geo, destination tariff) and **degrades
+  gracefully** if that service is down: the other rules and the pipeline keep
+  running.
+- **Correct under redelivery** — partition-by-subscriber, manual offset commit
+  and `record_id` idempotency turn at-least-once delivery into *effectively*
+  once. One alert per subscriber per window, not one per offending call.
+- **Observable** — Prometheus metrics and a provisioned Grafana dashboard
+  (throughput, alerts by rule, consumer lag).
+- **Kubernetes-native scaling** — a Helm chart deploys the whole stack; **KEDA**
+  autoscales the fraud consumer on Kafka lag (1 → 3 replicas).
+- **Measured** — ~890 events/s per replica at p99 ~25 ms; the numbers are
+  reproducible (see [Performance](#performance)).
+
+## Architecture
+
+```
+ generator ──▶ Kafka ─────▶ fraud ─────▶ Kafka ─────▶ read-api ──▶ HTTP /alerts
+ (synthetic    (cdr.raw,    │ 3 rules     (cdr.fraud   (Postgres,
+  CDRs +        msisdn-     │ + Redis      .alert)      idempotent)
+  fraud         keyed,      │ state)
+  scenarios)    3 parts)    │
+                            └─ gRPC ─▶ subscriber-service (cell→geo · tariff)
+```
+
+**Async where it fits, sync where it fits:** the event stream flows over Kafka;
+per-record enrichment is a synchronous gRPC call. Two communication models, each
+in its right place.
+
+| Service | Role |
 |---|---|
-| Event-driven pipeline (Kafka, KRaft) | ✅ |
-| Velocity kuralı (Redis kayan pencere) | ✅ |
-| Impossible-travel kuralı (Haversine + son-konum) | ✅ |
-| IRSF kuralı (premium harcama penceresi) | ✅ |
-| gRPC enrichment (subscriber-service) | ✅ |
-| Idempotency + manuel offset commit | ✅ |
-| Flag'leri HTTP'de sunma (`read-api`) | ✅ |
-| CI (gofmt · build · vet · test) | ✅ |
-| Gözlemlenebilirlik (Prometheus + Grafana) | ✅ |
-| Kubernetes (Helm) + KEDA lag-autoscaling | ✅ |
-| Yük testi + ölçülmüş sayılar | ✅ |
+| **generator** | Emits synthetic CDRs + injects fraud scenarios (velocity bursts, impossible-travel jumps, IRSF spikes) |
+| **fraud** | Consumes `cdr.raw`; runs the three rules over Redis state; emits alerts on `cdr.fraud.alert` |
+| **subscriber-service** | gRPC reference data — cell → geo (`GetCell`) and destination tariff (`GetTariff`) |
+| **read-api** | Stores alerts in Postgres (idempotently); serves `GET /alerts` and `/healthz` |
 
-## Nasıl çalışır
+Infrastructure: **Kafka (KRaft)** · **Postgres** · **Redis**.
 
-```
-generator ──▶ Kafka (cdr.raw) ──▶ fraud ──▶ Kafka (cdr.fraud.alert) ──▶ read-api ──▶ HTTP
- sentetik      3 partition        │  velocity · impossible-travel · IRSF   Postgres      /alerts
- CDR + fraud   msisdn-key'li      └── gRPC ──▶ subscriber (cell→geo, tarife) (idempotent)
- senaryoları
-```
+## The fraud rules
 
-| Servis | Görev |
-|---|---|
-| **generator** | Sentetik CDR üretir + periyodik fraud senaryoları (velocity burst, impossible-travel, IRSF) enjekte eder |
-| **fraud** | `cdr.raw`'ı tüketir; **velocity**, **impossible-travel** ve **IRSF** (premium harcama penceresi) kurallarını uygular; abone başına dedup'lı alert üretir |
-| **subscriber** | gRPC referans servisi — hücre→coğrafya (`GetCell`) ve destinasyon tarifesi (`GetTariff`) sunar; fraud enrichment için çağırır |
-| **read-api** | Alert'leri Postgres'e (idempotent) yazar; `GET /alerts`, `GET /healthz` sunar |
+Each rule catches a different real fraud type, so each needs a different
+technique — that is the point, not three variations of a threshold.
 
-Altyapı: **Kafka (KRaft)** · **Postgres** · **Redis**.
+| Rule | Fraud it catches | Technique |
+|---|---|---|
+| **Velocity** | SIM-box / high-volume abuse | Redis sliding-window count per subscriber |
+| **Impossible-travel** | cloned SIM / account takeover | last-known cell (Redis) + Haversine distance vs. elapsed time |
+| **IRSF** | International Revenue Share Fraud | premium-destination spend accrued in a window (tariff fetched via gRPC) |
 
-## Hızlı demo
+The generator injects each scenario on a timer, so a fresh run flags all three
+within a minute.
 
-Gerekli: Docker + Docker Compose.
+## Run it
+
+Requires Docker + Docker Compose.
 
 ```bash
-make up        # her şeyi tek komutla ayağa kaldırır
+make up                        # the whole core, one command
+curl -s localhost:8090/alerts  # flagged calls (JSON)
+make logs                      # watch fraud catch the injected scenarios
+make down
 ```
 
-~15 saniye içinde generator ilk dolandırıcılık burst'ünü enjekte eder, fraud yakalar. Gör:
+Within ~15 seconds the generator injects its first fraud scenario, the fraud
+service flags it, and the alert appears on `read-api`.
+
+## Design decisions
+
+- **Partition by subscriber** — events are keyed by `caller_msisdn`, so all of a
+  subscriber's calls land on one partition and one consumer. Stateful rules stay
+  consistent, ordering is preserved, and the fraud service scales out (up to the
+  partition count) without splitting a subscriber's state.
+- **Effectively-once** — Kafka gives at-least-once; the fraud consumer commits
+  offsets manually (only after processing), dedups on `record_id`, and uses
+  `record_id` as the sliding-window member so a redelivered record cannot inflate
+  a count. Alerts are stored with `ON CONFLICT DO NOTHING`.
+- **Emit before advancing state** — an alert is emitted *before* a rule's Redis
+  state moves forward, so a failed emit can be retried instead of lost. Alerts
+  are de-duplicated per `(rule, subscriber)` per window, so a burst yields one
+  alert, not a flood.
+- **gRPC for enrichment, graceful degradation** — impossible-travel and IRSF
+  need reference data (cell geo, tariff), fetched synchronously over gRPC with a
+  timeout. If `subscriber-service` is down, those rules are skipped while
+  velocity and the pipeline carry on.
+- **Async vs sync, on purpose** — Kafka decouples the high-volume event flow;
+  gRPC serves the synchronous per-record lookup. The split is deliberate — the
+  kind of decision a reviewer should be able to interrogate.
+
+## Observability
 
 ```bash
-curl -s localhost:8090/alerts
-# {"count":N,"alerts":[
-#   {"caller_msisdn":"+905...","rule":"velocity",
-#    "evidence":"12 calls within 60s (threshold 12)", ...},
-#   {"caller_msisdn":"+905...","rule":"impossible_travel",
-#    "evidence":"7930 km in 1s → 28548026 km/h (max 1000)", ...}
-# ]}
+make up-observability   # adds Prometheus + Grafana + kafka-exporter
+# Grafana: http://localhost:3001  (anonymous, no login)
 ```
 
-```bash
-make logs      # canlı loglar — fraud'un "FRAUD" satırlarını gör
-make down      # her şeyi kapat
-```
+Each service exposes Prometheus metrics on `:9100`; a provisioned Grafana
+dashboard shows throughput, fraud alerts per rule, and Kafka consumer lag live:
 
-## Gözlemlenebilirlik
-
-Prometheus + Grafana ayrı bir compose profilinde — çekirdeği bozmadan üste eklenir:
-
-```bash
-make up-observability   # çekirdek + Prometheus + Grafana + kafka-exporter
-```
-
-Grafana: **http://localhost:3001** (anonim, login yok). **"CDR Fraud Detection"** dashboard'u canlı gösterir:
-
-- **throughput** — üretilen / işlenen olay/s
-- **kural bazında fraud alert/s** — velocity · impossible-travel · IRSF
-- **Kafka consumer lag** — `kafka-exporter`'dan (KEDA autoscaling'in de temeli)
-- özet sayaçlar
-
-![CDR Fraud Detection — Grafana dashboard](docs/grafana-dashboard.png)
-
-Her Go servisi `/metrics` (`:9100`) sunar; Prometheus 5 saniyede bir toplar.
+![Grafana dashboard](docs/grafana-dashboard.png)
 
 ## Kubernetes + autoscaling
 
-Çekirdek, local bir **kind** cluster'a **Helm** ile kurulur; **KEDA** fraud servisini Kafka consumer-lag'ine göre otomatik ölçekler.
-
 ```bash
-make k8s-up      # kind cluster + KEDA + cdr chart (Kafka/PG/Redis + 4 servis)
-make k8s-load    # lag üret → KEDA fraud'u 1 → 3 replica'ya çıkarır
+make k8s-up      # kind cluster + KEDA + the Helm chart
+make k8s-load    # generate lag → KEDA scales fraud 1 → 3
 kubectl get hpa -w
-make k8s-down    # cluster'ı sil
+make k8s-down
 ```
 
-- Tüm servisler tek Helm chart'ında (`deploy/helm/cdr`), health/readiness probe'larıyla.
-- **KEDA `ScaledObject`** fraud'u `cdr.raw` lag'ine göre ölçekler (min 1, max 3 = partition sayısı).
-- MSISDN-key'li partition sayesinde ölçeklenen fraud replica'ları abone-state tutarlılığını korur.
+The Helm chart (`deploy/helm/cdr`) deploys the whole stack with health probes. A
+**KEDA `ScaledObject`** autoscales the fraud deployment on `cdr.raw` consumer lag
+(min 1, max 3 = partition count); because events are keyed by subscriber, the
+scaled-out replicas keep per-subscriber state consistent. Captured evidence:
+[`docs/k8s-autoscaling.txt`](docs/k8s-autoscaling.txt).
 
-Yük altında KEDA fraud'u `cdr.raw` lag'ine göre **1 → 3 replica**'ya çıkarır:
+> ⚠️ A local kind cluster — this demonstrates *deploying to Kubernetes with Helm
+> and KEDA lag-autoscaling*, not production Kubernetes operations.
 
-```text
-$ kubectl get hpa keda-hpa-fraud
-NAME             REFERENCE          TARGETS   MINPODS   MAXPODS   REPLICAS
-keda-hpa-fraud   Deployment/fraud   .../100   1         3         3          # 1 → 3
+## Performance
 
-$ kubectl get pods -l app=fraud
-fraud-...-g7l8t   1/1   Running
-fraud-...-jt9c2   1/1   Running
-fraud-...-r76m7   1/1   Running
-```
+Measured on Docker Compose, one machine (Apple Silicon, Docker ~11 CPU / 8 GB),
+a single `fraud` replica — reproducible with `make loadtest` and
+`k6 run loadtest/read-api.js`:
 
-_(tam çıktı: [`docs/k8s-autoscaling.txt`](docs/k8s-autoscaling.txt))_
-
-> ⚠️ Local kind cluster — "production K8s operasyonu" iddiası değil; **K8s'e Helm ile deploy + KEDA ile lag-tabanlı autoscaling** gösterimi.
-
-## Performans (yük testi)
-
-Docker Compose'da, **tek makine** (Apple Silicon, Docker ~11 CPU / 8 GB), **tek fraud replica** ile ölçüldü — tekrar üretilebilir:
-
-```bash
-make loadtest                 # pipeline'ı doyur (async Go producer, cmd/loadgen)
-k6 run loadtest/read-api.js   # read-api HTTP yükü
-```
-
-| Ölçüm | Sonuç |
+| Metric | Result |
 |---|---|
-| **Pipeline throughput** (fraud, doyurulmuş) | **~890 olay/s** |
-| **Pipeline latency** (300 olay/s'de, üretim → işlenme) | p50 ~6 ms · **p99 ~25 ms** |
-| **read-api HTTP** (`GET /alerts`, 50 VU, k6) | **~12.000 istek/s** · p95 ~7 ms · %0 hata |
+| Pipeline throughput (fraud, saturated) | **~890 events/s** |
+| Pipeline latency at 300 events/s (produce → processed) | p50 ~6 ms · **p99 ~25 ms** |
+| read-api HTTP (`GET /alerts`, 50 VUs, k6) | **~12,000 req/s** · p95 ~7 ms · 0% errors |
 
-- Pipeline throughput'unu sınırlayan, fraud'un **kayıt başına 2 senkron gRPC enrichment + Redis** işi — producer'ın kendisi ~533k/s üretebiliyor, darboğaz o değil. Bu tam da **KEDA'nın çözdüğü şey**: yük altında fraud 1 → 3 replica'ya ölçeklenip kapasiteyi ~3×'e çıkarır.
-- Latency `cdr_processing_latency_seconds` histogram'ından, throughput `cdr_processed_total` rate'inden okundu (Prometheus).
+Throughput per replica is bounded by the fraud service's two synchronous gRPC
+enrichment calls + Redis ops per record — the producer alone sustains ~533k/s,
+so it is the *processing* that costs, not the ingest. That is exactly what KEDA
+addresses: under load, fraud scales 1 → 3 for roughly triple the capacity.
 
-> ⚠️ Tek makine, local sayılar — dağıtık benchmark değil; makine ve komutlar şeffaf.
+> ⚠️ Single-machine, local numbers — not a distributed benchmark; the machine and
+> commands are stated so you can reproduce them.
 
-## Tasarım notları
-
-- **Partition-by-key:** olaylar `caller_msisdn` ile key'lenir → bir abonenin tüm çağrıları aynı partition/consumer'a düşer; böylece kayan pencere consumer'lar ölçeklenince bile tutarlı kalır.
-- **Idempotency:** kayan pencerenin ZSET üyesi `record_id` olduğundan tekrar teslim edilen olay sayacı şişirmez; alert'ler Postgres'e `ON CONFLICT DO NOTHING` ile yazılır.
-- **Manuel commit:** offset yalnızca işlem bittikten sonra ilerler → _at-least-once_ teslim + idempotency = pratikte _effectively-once_.
-- **Senkron enrichment (gRPC):** impossible-travel için fraud, her çağrının hücre koordinatını `subscriber-service`'ten gRPC ile (timeout'lu) çeker. subscriber-service düşse bile velocity ve pipeline çalışmaya devam eder — enrichment zarifçe devre dışı kalır (graceful degradation).
-- **Alert de-dup:** aynı abone + kural için pencere başına en fazla bir alert (Redis cooldown bayrağı) → bir burst 4-5 değil, **tek** alert üretir. Bayrak yalnızca başarılı emit'ten sonra konur, böylece emit hatası retry'da kaybolmaz.
-
-## Geliştirme
+## Testing & CI
 
 ```bash
-make build     # go build ./...
-make test      # testler
-make lint      # gofmt + vet
-make help      # tüm komutlar
+make test   # unit tests — the fraud rules are pure and table-driven
+make lint   # gofmt + vet
 ```
 
-## Lisans
+GitHub Actions runs gofmt, build, vet and the tests on every push.
 
-[MIT](LICENSE)
+## Layout
+
+```
+cmd/loadgen         async Kafka load generator (throughput/latency tests)
+internal/cdr        event schema (CDR, FraudAlert)
+internal/stream     Kafka helpers (keyed producer, manual-commit consumer)
+internal/rules      the three fraud rules (pure, table-tested)
+internal/geo        cell → geo catalog + Haversine
+internal/tariff     destination tariff catalog
+internal/platform   logging, config, metrics/health server, graceful shutdown
+services/           generator · fraud · subscriber · read-api
+proto/              gRPC contract (subscriber Reference service)
+deploy/             Dockerfile, docker-compose, Helm chart, observability
+loadtest/           k6 script
+```
+
+## License
+
+[MIT](LICENSE) © Ahmet Hasan Aygün
