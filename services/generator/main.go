@@ -23,6 +23,7 @@ import (
 	"github.com/ahaygun/go-cdr-fraud-detector/internal/geo"
 	"github.com/ahaygun/go-cdr-fraud-detector/internal/platform"
 	"github.com/ahaygun/go-cdr-fraud-detector/internal/stream"
+	"github.com/ahaygun/go-cdr-fraud-detector/internal/tariff"
 )
 
 type subscriber struct {
@@ -41,9 +42,12 @@ func main() {
 	burstEvery := seconds(platform.Getenv("BURST_EVERY", "15"))
 	burstSize := atoi(platform.Getenv("BURST_SIZE", "15"))
 	travelEvery := seconds(platform.Getenv("TRAVEL_EVERY", "20"))
+	irsfEvery := seconds(platform.Getenv("IRSF_EVERY", "25"))
+	irsfCalls := atoi(platform.Getenv("IRSF_CALLS", "4"))
 
 	log.Info("starting", "kafka_brokers", brokers, "rate_per_sec", rate,
-		"burst_every", burstEvery.String(), "travel_every", travelEvery.String())
+		"burst_every", burstEvery.String(), "travel_every", travelEvery.String(),
+		"irsf_every", irsfEvery.String())
 
 	if err := stream.EnsureTopics(ctx, brokers,
 		stream.TopicSpec{Name: cdr.TopicRaw, Partitions: 3},
@@ -64,6 +68,8 @@ func main() {
 	defer burstTick.Stop()
 	travelTick := time.NewTicker(travelEvery)
 	defer travelTick.Stop()
+	irsfTick := time.NewTicker(irsfEvery)
+	defer irsfTick.Stop()
 
 	for {
 		select {
@@ -88,6 +94,16 @@ func main() {
 			log.Warn("injecting impossible-travel", "caller", s.msisdn, "from", s.homeCell, "to", far)
 			emit(ctx, log, w, cdrFrom(s.msisdn, randomCallee(pool), s.homeCell))
 			emit(ctx, log, w, cdrFrom(s.msisdn, randomCallee(pool), far))
+
+		case <-irsfTick.C:
+			s := pool[rand.IntN(len(pool))]
+			dest := premiumCallee()
+			log.Warn("injecting IRSF", "caller", s.msisdn, "dest", dest, "calls", irsfCalls)
+			for i := 0; i < irsfCalls; i++ {
+				rec := cdrFrom(s.msisdn, dest, s.homeCell)
+				rec.DurationSec = 300 + rand.IntN(600) // long premium calls (5-15 min)
+				emit(ctx, log, w, rec)
+			}
 		}
 	}
 }
@@ -147,6 +163,19 @@ func farCellFrom(homeID string) string {
 		return homeID
 	}
 	return far[rand.IntN(len(far))]
+}
+
+// premiumCallee builds a callee on a premium (revenue-share) prefix from the
+// tariff catalog — the destination an IRSF fraudster pumps traffic to.
+func premiumCallee() string {
+	var prefixes []string
+	for _, t := range tariff.Catalog {
+		if t.Premium {
+			prefixes = append(prefixes, t.Prefix)
+		}
+	}
+	prefix := prefixes[rand.IntN(len(prefixes))]
+	return prefix + fmt.Sprintf("%07d", rand.IntN(10_000_000))
 }
 
 // newID returns a random 128-bit hex id. math/rand/v2 is fine — synthetic data.
