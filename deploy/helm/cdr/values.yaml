@@ -1,0 +1,15 @@
+# Images are built locally and loaded into kind (see `make k8s-images`).
+image:
+  repoPrefix: cdr
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# fraud is the autoscaled consumer. maxReplicas <= cdr.raw partition count (3).
+fraud:
+  minReplicas: 1
+  maxReplicas: 3
+
+# KEDA scales fraud on Kafka consumer-group lag.
+keda:
+  enabled: true
+  lagThreshold: "100"

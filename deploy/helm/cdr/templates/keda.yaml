@@ -1,0 +1,24 @@
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: fraud
+  labels: { app: fraud }
+spec:
+  scaleTargetRef:
+    name: fraud
+  minReplicaCount: {{ .Values.fraud.minReplicas }}
+  maxReplicaCount: {{ .Values.fraud.maxReplicas }}
+  pollingInterval: 5
+  cooldownPeriod: 30
+  triggers:
+    - type: kafka
+      metadata:
+        # FQDN: the KEDA operator runs in its own namespace and must resolve
+        # our Kafka service cross-namespace.
+        bootstrapServers: kafka.{{ .Release.Namespace }}.svc.cluster.local:9092
+        consumerGroup: fraud
+        topic: cdr.raw
+        lagThreshold: "{{ .Values.keda.lagThreshold }}"
+        offsetResetPolicy: latest
+{{- end }}

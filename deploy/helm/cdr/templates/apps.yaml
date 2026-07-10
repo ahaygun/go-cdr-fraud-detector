@@ -1,0 +1,157 @@
+{{- $img := printf "%s" .Values.image.repoPrefix -}}
+{{- $tag := .Values.image.tag -}}
+{{- $pull := .Values.image.pullPolicy -}}
+# --- generator --------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: generator
+  labels: { app: generator }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: generator }
+  template:
+    metadata:
+      labels: { app: generator }
+    spec:
+      containers:
+        - name: generator
+          image: "{{ $img }}/generator:{{ $tag }}"
+          imagePullPolicy: {{ $pull }}
+          ports:
+            - { name: metrics, containerPort: 9100 }
+          env:
+            - { name: KAFKA_BROKERS, value: "kafka:9092" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 9100 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 9100 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "25m", memory: "32Mi" }
+            limits: { cpu: "500m", memory: "128Mi" }
+---
+# --- fraud (KEDA-autoscaled) ------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud
+  labels: { app: fraud }
+spec:
+  replicas: {{ .Values.fraud.minReplicas }}
+  selector:
+    matchLabels: { app: fraud }
+  template:
+    metadata:
+      labels: { app: fraud }
+    spec:
+      containers:
+        - name: fraud
+          image: "{{ $img }}/fraud:{{ $tag }}"
+          imagePullPolicy: {{ $pull }}
+          ports:
+            - { name: metrics, containerPort: 9100 }
+          env:
+            - { name: KAFKA_BROKERS, value: "kafka:9092" }
+            - { name: REDIS_ADDR, value: "redis:6379" }
+            - { name: SUBSCRIBER_ADDR, value: "subscriber:50051" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 9100 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 9100 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "48Mi" }
+            limits: { cpu: "500m", memory: "128Mi" }
+---
+# --- subscriber (gRPC) ------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subscriber
+  labels: { app: subscriber }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: subscriber }
+  template:
+    metadata:
+      labels: { app: subscriber }
+    spec:
+      containers:
+        - name: subscriber
+          image: "{{ $img }}/subscriber:{{ $tag }}"
+          imagePullPolicy: {{ $pull }}
+          ports:
+            - { name: grpc, containerPort: 50051 }
+          env:
+            - { name: GRPC_ADDR, value: ":50051" }
+          readinessProbe:
+            tcpSocket: { port: 50051 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "25m", memory: "32Mi" }
+            limits: { cpu: "500m", memory: "128Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: subscriber
+spec:
+  selector: { app: subscriber }
+  ports:
+    - { name: grpc, port: 50051, targetPort: 50051 }
+---
+# --- read-api (HTTP) --------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: read-api
+  labels: { app: read-api }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: read-api }
+  template:
+    metadata:
+      labels: { app: read-api }
+    spec:
+      containers:
+        - name: read-api
+          image: "{{ $img }}/read-api:{{ $tag }}"
+          imagePullPolicy: {{ $pull }}
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: metrics, containerPort: 9100 }
+          env:
+            - { name: HTTP_ADDR, value: ":8080" }
+            - { name: KAFKA_BROKERS, value: "kafka:9092" }
+            - { name: POSTGRES_DSN, value: "postgres://cdr:cdr@postgres:5432/cdr?sslmode=disable" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 9100 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 9100 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "25m", memory: "48Mi" }
+            limits: { cpu: "500m", memory: "128Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: read-api
+spec:
+  selector: { app: read-api }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }

@@ -1,7 +1,10 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: help build vet test lint tidy proto up up-infra up-observability down logs ps clean
+.PHONY: help build vet test lint tidy proto up up-infra up-observability down logs ps clean \
+        k8s-images k8s-up k8s-load k8s-unload k8s-down
+
+KIND_CLUSTER := cdr
 
 help: ## Bu yardımı göster
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -44,6 +47,30 @@ logs: ## Logları izle
 
 ps: ## Servis durumları
 	$(COMPOSE) ps
+
+k8s-images: ## Servis image'larını derle + kind'e yükle
+	@for s in generator fraud subscriber read-api; do \
+		docker build -q --build-arg SERVICE=$$s -f deploy/Dockerfile -t cdr/$$s:dev . >/dev/null && echo "built $$s"; \
+	done
+	kind load docker-image cdr/generator:dev cdr/fraud:dev cdr/subscriber:dev cdr/read-api:dev --name $(KIND_CLUSTER)
+
+k8s-up: ## kind cluster + KEDA + cdr chart (çekirdeği Kubernetes'e kurar)
+	kind create cluster --name $(KIND_CLUSTER)
+	$(MAKE) k8s-images
+	helm repo add kedacore https://kedacore.github.io/charts
+	helm repo update kedacore
+	helm install keda kedacore/keda -n keda --create-namespace --wait
+	helm install cdr ./deploy/helm/cdr
+	@echo "izle: kubectl get pods -w   |   yük: make k8s-load"
+
+k8s-load: ## Lag üret → KEDA fraud'u 1→3 ölçeklendirir (izle: kubectl get hpa -w)
+	kubectl scale deployment generator --replicas=6
+
+k8s-unload: ## Yükü kaldır (fraud geri 1'e iner)
+	kubectl scale deployment generator --replicas=1
+
+k8s-down: ## kind cluster'ı tamamen sil
+	kind delete cluster --name $(KIND_CLUSTER)
 
 clean: ## Derleme artıklarını temizle
 	rm -rf bin
