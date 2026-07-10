@@ -72,6 +72,9 @@ services:
     restart: unless-stopped
     environment:
       KAFKA_BROKERS: kafka:9092
+      RATE: "10" # normal calls/sec across the pool
+      BURST_EVERY: "15" # inject a velocity burst every N seconds
+      BURST_SIZE: "15" # calls per burst (must exceed the fraud threshold)
     depends_on:
       kafka:
         condition: service_healthy
@@ -87,6 +90,8 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       REDIS_ADDR: redis:6379
+      VELOCITY_WINDOW_SEC: "60"
+      VELOCITY_THRESHOLD: "12"
     depends_on:
       kafka:
         condition: service_healthy
@@ -120,8 +125,11 @@ services:
       - "8090:8080" # host 8090 -> container 8080
     environment:
       HTTP_ADDR: ":8080"
+      KAFKA_BROKERS: kafka:9092
       POSTGRES_DSN: "postgres://cdr:cdr@postgres:5432/cdr?sslmode=disable"
     depends_on:
+      kafka:
+        condition: service_healthy
       postgres:
         condition: service_healthy
 
