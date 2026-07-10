@@ -78,6 +78,8 @@ Grafana: **http://localhost:3001** (anonim, login yok). **"CDR Fraud Detection"*
 - **Kafka consumer lag** — `kafka-exporter`'dan (KEDA autoscaling'in de temeli)
 - özet sayaçlar
 
+![CDR Fraud Detection — Grafana dashboard](docs/grafana-dashboard.png)
+
 Her Go servisi `/metrics` (`:9100`) sunar; Prometheus 5 saniyede bir toplar.
 
 ## Kubernetes + autoscaling
@@ -94,6 +96,21 @@ make k8s-down    # cluster'ı sil
 - Tüm servisler tek Helm chart'ında (`deploy/helm/cdr`), health/readiness probe'larıyla.
 - **KEDA `ScaledObject`** fraud'u `cdr.raw` lag'ine göre ölçekler (min 1, max 3 = partition sayısı).
 - MSISDN-key'li partition sayesinde ölçeklenen fraud replica'ları abone-state tutarlılığını korur.
+
+Yük altında KEDA fraud'u `cdr.raw` lag'ine göre **1 → 3 replica**'ya çıkarır:
+
+```text
+$ kubectl get hpa keda-hpa-fraud
+NAME             REFERENCE          TARGETS   MINPODS   MAXPODS   REPLICAS
+keda-hpa-fraud   Deployment/fraud   .../100   1         3         3          # 1 → 3
+
+$ kubectl get pods -l app=fraud
+fraud-...-g7l8t   1/1   Running
+fraud-...-jt9c2   1/1   Running
+fraud-...-r76m7   1/1   Running
+```
+
+_(tam çıktı: [`docs/k8s-autoscaling.txt`](docs/k8s-autoscaling.txt))_
 
 > ⚠️ Local kind cluster — "production K8s operasyonu" iddiası değil; **K8s'e Helm ile deploy + KEDA ile lag-tabanlı autoscaling** gösterimi.
 
