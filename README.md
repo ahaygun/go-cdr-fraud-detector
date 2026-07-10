@@ -17,7 +17,7 @@ Akan **CDR (Call Detail Record)** verisinden **gerçek zamanlı fraud (dolandır
 | Flag'leri HTTP'de sunma (`read-api`) | ✅ |
 | CI (gofmt · build · vet · test) | ✅ |
 | Gözlemlenebilirlik (Prometheus + Grafana) | ✅ |
-| Kubernetes + KEDA autoscaling | 🔜 opsiyonel (Faz 5) |
+| Kubernetes (Helm) + KEDA lag-autoscaling | ✅ |
 | Yük testi (k6) + sayılar | 🔜 opsiyonel (Faz 6) |
 
 ## Nasıl çalışır
@@ -79,6 +79,23 @@ Grafana: **http://localhost:3001** (anonim, login yok). **"CDR Fraud Detection"*
 - özet sayaçlar
 
 Her Go servisi `/metrics` (`:9100`) sunar; Prometheus 5 saniyede bir toplar.
+
+## Kubernetes + autoscaling
+
+Çekirdek, local bir **kind** cluster'a **Helm** ile kurulur; **KEDA** fraud servisini Kafka consumer-lag'ine göre otomatik ölçekler.
+
+```bash
+make k8s-up      # kind cluster + KEDA + cdr chart (Kafka/PG/Redis + 4 servis)
+make k8s-load    # lag üret → KEDA fraud'u 1 → 3 replica'ya çıkarır
+kubectl get hpa -w
+make k8s-down    # cluster'ı sil
+```
+
+- Tüm servisler tek Helm chart'ında (`deploy/helm/cdr`), health/readiness probe'larıyla.
+- **KEDA `ScaledObject`** fraud'u `cdr.raw` lag'ine göre ölçekler (min 1, max 3 = partition sayısı).
+- MSISDN-key'li partition sayesinde ölçeklenen fraud replica'ları abone-state tutarlılığını korur.
+
+> ⚠️ Local kind cluster — "production K8s operasyonu" iddiası değil; **K8s'e Helm ile deploy + KEDA ile lag-tabanlı autoscaling** gösterimi.
 
 ## Tasarım notları
 
