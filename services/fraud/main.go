@@ -176,6 +176,7 @@ func (p *processor) handle(ctx context.Context, value []byte) error {
 		return err
 	}
 
+	cdrLatency.Observe(time.Since(rec.StartTime).Seconds())
 	return markSeen(ctx, p.rdb, rec.RecordID, p.seenTTL)
 }
 
