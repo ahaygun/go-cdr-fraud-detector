@@ -1,0 +1,17 @@
+# Binaries & build output
+/bin/
+*.exe
+*.out
+*.test
+
+# Local env
+.env
+.env.local
+
+# OS / editor cruft
+.DS_Store
+.idea/
+.vscode/
+
+# Local working roadmap (kept out of the public repo for now)
+PLAN.md
