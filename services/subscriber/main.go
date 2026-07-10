@@ -15,6 +15,7 @@ import (
 	cdrv1 "github.com/ahaygun/go-cdr-fraud-detector/gen/cdr/v1"
 	"github.com/ahaygun/go-cdr-fraud-detector/internal/geo"
 	"github.com/ahaygun/go-cdr-fraud-detector/internal/platform"
+	"github.com/ahaygun/go-cdr-fraud-detector/internal/tariff"
 )
 
 type server struct {
@@ -27,6 +28,11 @@ func (s *server) GetCell(_ context.Context, req *cdrv1.GetCellRequest) (*cdrv1.C
 		return nil, status.Errorf(codes.NotFound, "cell %q not found", req.GetCellId())
 	}
 	return &cdrv1.Cell{CellId: c.ID, Lat: c.Lat, Lon: c.Lon, Name: c.Name}, nil
+}
+
+func (s *server) GetTariff(_ context.Context, req *cdrv1.GetTariffRequest) (*cdrv1.Tariff, error) {
+	t := tariff.Lookup(req.GetDestination()) // always resolves (falls back for unknown prefixes)
+	return &cdrv1.Tariff{Prefix: t.Prefix, RatePerMin: t.RatePerMin, Premium: t.Premium, Name: t.Name}, nil
 }
 
 func main() {
@@ -50,7 +56,7 @@ func main() {
 		s.GracefulStop()
 	}()
 
-	log.Info("gRPC listening", "addr", addr, "cells", len(geo.Catalog))
+	log.Info("gRPC listening", "addr", addr, "cells", len(geo.Catalog), "tariffs", len(tariff.Catalog))
 	if err := s.Serve(lis); err != nil {
 		log.Error("serve failed", "err", err)
 	}

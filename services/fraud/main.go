@@ -52,11 +52,16 @@ func main() {
 	travel := rules.ImpossibleTravel{
 		MaxSpeedKmh: float64(atoi(platform.Getenv("IMPOSSIBLE_TRAVEL_MAX_KMH", "1000"))),
 	}
+	irsf := rules.IRSF{
+		WindowSeconds:  atoi(platform.Getenv("IRSF_WINDOW_SEC", "300")),
+		SpendThreshold: float64(atoi(platform.Getenv("IRSF_SPEND_THRESHOLD", "50"))),
+	}
 	alertCooldown := time.Duration(atoi(platform.Getenv("ALERT_COOLDOWN_SEC", "60"))) * time.Second
 
 	log.Info("starting", "kafka_brokers", brokers, "redis_addr", redisAddr,
 		"subscriber_addr", subscriberAddr, "velocity_threshold", vel.Threshold,
-		"impossible_travel_max_kmh", travel.MaxSpeedKmh, "alert_cooldown", alertCooldown.String())
+		"impossible_travel_max_kmh", travel.MaxSpeedKmh, "irsf_threshold", irsf.SpendThreshold,
+		"alert_cooldown", alertCooldown.String())
 
 	if err := stream.EnsureTopics(ctx, brokers,
 		stream.TopicSpec{Name: cdr.TopicRaw, Partitions: 3},
@@ -89,7 +94,9 @@ func main() {
 		writer:        writer,
 		vel:           vel,
 		travel:        travel,
+		irsf:          irsf,
 		windowMs:      int64(vel.WindowSeconds) * 1000,
+		irsfWindowMs:  int64(irsf.WindowSeconds) * 1000,
 		seenTTL:       time.Duration(vel.WindowSeconds*3) * time.Second,
 		alertCooldown: alertCooldown,
 	}
@@ -134,7 +141,9 @@ type processor struct {
 	writer        *kafka.Writer
 	vel           rules.Velocity
 	travel        rules.ImpossibleTravel
+	irsf          rules.IRSF
 	windowMs      int64
+	irsfWindowMs  int64
 	seenTTL       time.Duration
 	alertCooldown time.Duration
 }
@@ -158,6 +167,9 @@ func (p *processor) handle(ctx context.Context, value []byte) error {
 		return err
 	}
 	if err := p.checkImpossibleTravel(ctx, rec); err != nil {
+		return err
+	}
+	if err := p.checkIRSF(ctx, rec); err != nil {
 		return err
 	}
 
@@ -210,6 +222,32 @@ func (p *processor) checkImpossibleTravel(ctx context.Context, rec cdr.CDR) erro
 	}
 
 	return setLastLocation(ctx, p.rdb, rec.CallerMSISDN, current, lastLocTTL)
+}
+
+func (p *processor) checkIRSF(ctx context.Context, rec cdr.CDR) error {
+	// Enrichment: is the destination a premium/international number, and at what rate?
+	cctx, cancel := context.WithTimeout(ctx, grpcTimeout)
+	defer cancel()
+	t, err := p.ref.GetTariff(cctx, &cdrv1.GetTariffRequest{Destination: rec.CalleeMSISDN})
+	if err != nil {
+		p.log.Warn("irsf skipped: enrichment unavailable", "err", err, "caller", rec.CallerMSISDN)
+		return nil
+	}
+	if !t.GetPremium() {
+		return nil // only premium destinations accrue IRSF spend
+	}
+
+	cost := float64(rec.DurationSec) / 60.0 * t.GetRatePerMin()
+	spend, err := premiumSpendInWindow(ctx, p.rdb, "spend:"+rec.CallerMSISDN,
+		rec.StartTime.UnixMilli(), p.irsfWindowMs, rec.RecordID, cost)
+	if err != nil {
+		return err
+	}
+
+	if triggered, score, evidence := p.irsf.Evaluate(spend); triggered {
+		return p.maybeEmit(ctx, rec, cdr.RuleIRSF, score, evidence)
+	}
+	return nil
 }
 
 // maybeEmit emits a fraud alert, but at most once per (rule, subscriber) within
