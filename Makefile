@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: help build vet test lint tidy up up-infra down logs ps clean
+.PHONY: help build vet test lint tidy proto up up-infra down logs ps clean
 
 help: ## Bu yardımı göster
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -23,6 +23,9 @@ lint: ## gofmt + vet (golangci-lint kuruluysa onu da)
 
 tidy: ## go mod tidy
 	go mod tidy
+
+proto: ## proto'dan Go + gRPC kodu üret (buf gerekir)
+	buf generate
 
 up: ## Tüm sistemi ayağa kaldır (infra + servisler)
 	$(COMPOSE) up --build -d

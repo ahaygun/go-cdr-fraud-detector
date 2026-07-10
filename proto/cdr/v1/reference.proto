@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package cdr.v1;
+
+option go_package = "github.com/ahaygun/go-cdr-fraud-detector/gen/cdr/v1;cdrv1";
+
+// Reference is the subscriber-service's gRPC API: static reference data used to
+// enrich fraud checks. Faz 2 needs cell -> geo (for impossible-travel);
+// subscriber profile / plan / tariff lookups are added in a later phase.
+service Reference {
+  // GetCell returns the geographic location of a cell tower.
+  rpc GetCell(GetCellRequest) returns (Cell);
+}
+
+message GetCellRequest {
+  string cell_id = 1;
+}
+
+message Cell {
+  string cell_id = 1;
+  double lat = 2;
+  double lon = 3;
+  string name = 4;
+}
