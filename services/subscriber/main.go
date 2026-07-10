@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"net"
 
 	"google.golang.org/grpc"
@@ -20,7 +19,6 @@ import (
 
 type server struct {
 	cdrv1.UnimplementedReferenceServer
-	log *slog.Logger
 }
 
 func (s *server) GetCell(_ context.Context, req *cdrv1.GetCellRequest) (*cdrv1.Cell, error) {
@@ -44,7 +42,7 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	cdrv1.RegisterReferenceServer(s, &server{log: log})
+	cdrv1.RegisterReferenceServer(s, &server{})
 
 	go func() {
 		<-ctx.Done()
