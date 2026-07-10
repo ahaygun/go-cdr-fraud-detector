@@ -14,7 +14,8 @@ const (
 	TopicRaw   = "cdr.raw"
 	TopicAlert = "cdr.fraud.alert"
 
-	RuleVelocity = "velocity"
+	RuleVelocity         = "velocity"
+	RuleImpossibleTravel = "impossible_travel"
 )
 
 type CallType string
