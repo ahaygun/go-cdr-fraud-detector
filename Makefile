@@ -2,7 +2,7 @@
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
 .PHONY: help build vet test lint tidy proto up up-infra up-observability down logs ps clean \
-        k8s-images k8s-up k8s-load k8s-unload k8s-down
+        k8s-images k8s-up k8s-load k8s-unload k8s-down loadtest
 
 KIND_CLUSTER := cdr
 
@@ -29,6 +29,9 @@ tidy: ## go mod tidy
 
 proto: ## proto'dan Go + gRPC kodu üret (buf gerekir)
 	buf generate
+
+loadtest: ## Pipeline'ı doyur (RATE=0) — throughput/p99'u Grafana/Prometheus'tan oku
+	RATE=$${RATE:-0} DURATION=$${DURATION:-30} go run ./cmd/loadgen
 
 up: ## Tüm sistemi ayağa kaldır (infra + servisler)
 	$(COMPOSE) up --build -d
