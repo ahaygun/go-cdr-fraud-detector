@@ -16,7 +16,9 @@ Akan **CDR (Call Detail Record)** verisinden **gerçek zamanlı fraud (dolandır
 | Idempotency + manuel offset commit | ✅ |
 | Flag'leri HTTP'de sunma (`read-api`) | ✅ |
 | CI (gofmt · build · vet · test) | ✅ |
-| Gözlemlenebilirlik (Prometheus/Grafana) | 🔜 Faz 4 |
+| Gözlemlenebilirlik (Prometheus + Grafana) | ✅ |
+| Kubernetes + KEDA autoscaling | 🔜 opsiyonel (Faz 5) |
+| Yük testi (k6) + sayılar | 🔜 opsiyonel (Faz 6) |
 
 ## Nasıl çalışır
 
@@ -60,6 +62,23 @@ curl -s localhost:8090/alerts
 make logs      # canlı loglar — fraud'un "FRAUD" satırlarını gör
 make down      # her şeyi kapat
 ```
+
+## Gözlemlenebilirlik
+
+Prometheus + Grafana ayrı bir compose profilinde — çekirdeği bozmadan üste eklenir:
+
+```bash
+make up-observability   # çekirdek + Prometheus + Grafana + kafka-exporter
+```
+
+Grafana: **http://localhost:3001** (anonim, login yok). **"CDR Fraud Detection"** dashboard'u canlı gösterir:
+
+- **throughput** — üretilen / işlenen olay/s
+- **kural bazında fraud alert/s** — velocity · impossible-travel · IRSF
+- **Kafka consumer lag** — `kafka-exporter`'dan (KEDA autoscaling'in de temeli)
+- özet sayaçlar
+
+Her Go servisi `/metrics` (`:9100`) sunar; Prometheus 5 saniyede bir toplar.
 
 ## Tasarım notları
 
