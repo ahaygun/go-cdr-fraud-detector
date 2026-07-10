@@ -59,7 +59,11 @@ func main() {
 
 	go consumeAlerts(ctx, log, brokers, pool)
 
-	srv := &http.Server{Addr: httpAddr, Handler: routes(log, pool)}
+	srv := &http.Server{
+		Addr:              httpAddr,
+		Handler:           routes(log, pool),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
