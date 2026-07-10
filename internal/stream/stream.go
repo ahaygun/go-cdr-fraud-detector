@@ -76,9 +76,12 @@ func createTopics(brokers []string, specs []TopicSpec) error {
 // per-subscriber state consistent as consumers scale out.
 func NewWriter(brokers []string, topic string) *kafka.Writer {
 	return &kafka.Writer{
-		Addr:         kafka.TCP(brokers...),
-		Topic:        topic,
-		Balancer:     &kafka.Hash{},
+		Addr:     kafka.TCP(brokers...),
+		Topic:    topic,
+		Balancer: &kafka.Hash{},
+		// Flush promptly instead of waiting to fill a batch — this is a
+		// real-time detector, so per-message latency matters more than batching.
+		BatchTimeout: 10 * time.Millisecond,
 		RequiredAcks: kafka.RequireOne,
 	}
 }
