@@ -18,7 +18,7 @@ Akan **CDR (Call Detail Record)** verisinden **gerçek zamanlı fraud (dolandır
 | CI (gofmt · build · vet · test) | ✅ |
 | Gözlemlenebilirlik (Prometheus + Grafana) | ✅ |
 | Kubernetes (Helm) + KEDA lag-autoscaling | ✅ |
-| Yük testi (k6) + sayılar | 🔜 opsiyonel (Faz 6) |
+| Yük testi + ölçülmüş sayılar | ✅ |
 
 ## Nasıl çalışır
 
@@ -113,6 +113,26 @@ fraud-...-r76m7   1/1   Running
 _(tam çıktı: [`docs/k8s-autoscaling.txt`](docs/k8s-autoscaling.txt))_
 
 > ⚠️ Local kind cluster — "production K8s operasyonu" iddiası değil; **K8s'e Helm ile deploy + KEDA ile lag-tabanlı autoscaling** gösterimi.
+
+## Performans (yük testi)
+
+Docker Compose'da, **tek makine** (Apple Silicon, Docker ~11 CPU / 8 GB), **tek fraud replica** ile ölçüldü — tekrar üretilebilir:
+
+```bash
+make loadtest                 # pipeline'ı doyur (async Go producer, cmd/loadgen)
+k6 run loadtest/read-api.js   # read-api HTTP yükü
+```
+
+| Ölçüm | Sonuç |
+|---|---|
+| **Pipeline throughput** (fraud, doyurulmuş) | **~890 olay/s** |
+| **Pipeline latency** (300 olay/s'de, üretim → işlenme) | p50 ~6 ms · **p99 ~25 ms** |
+| **read-api HTTP** (`GET /alerts`, 50 VU, k6) | **~12.000 istek/s** · p95 ~7 ms · %0 hata |
+
+- Pipeline throughput'unu sınırlayan, fraud'un **kayıt başına 2 senkron gRPC enrichment + Redis** işi — producer'ın kendisi ~533k/s üretebiliyor, darboğaz o değil. Bu tam da **KEDA'nın çözdüğü şey**: yük altında fraud 1 → 3 replica'ya ölçeklenip kapasiteyi ~3×'e çıkarır.
+- Latency `cdr_processing_latency_seconds` histogram'ından, throughput `cdr_processed_total` rate'inden okundu (Prometheus).
+
+> ⚠️ Tek makine, local sayılar — dağıtık benchmark değil; makine ve komutlar şeffaf.
 
 ## Tasarım notları
 
