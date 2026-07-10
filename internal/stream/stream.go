@@ -25,10 +25,12 @@ type TopicSpec struct {
 }
 
 // EnsureTopics creates the given topics if they don't exist. Idempotent and
-// safe to call from every service on startup; retries while the broker warms up.
+// safe to call from every service on startup; retries patiently while the
+// broker warms up (e.g. Kafka's slower cold start under Kubernetes) so services
+// wait for their dependency instead of crash-looping.
 func EnsureTopics(ctx context.Context, brokers []string, specs ...TopicSpec) error {
 	var lastErr error
-	for attempt := 0; attempt < 15; attempt++ {
+	for attempt := 0; attempt < 180; attempt++ {
 		if lastErr = createTopics(brokers, specs); lastErr == nil {
 			return nil
 		}

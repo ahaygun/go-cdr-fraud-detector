@@ -37,12 +37,16 @@ func Getenv(key, fallback string) string {
 	return fallback
 }
 
-// ServeMetrics serves Prometheus metrics on addr at /metrics until ctx is
-// cancelled. Call it in a goroutine; metrics are read from the default registry
-// (where promauto-registered counters live).
+// ServeMetrics serves Prometheus metrics at /metrics and a liveness/readiness
+// probe at /healthz on addr, until ctx is cancelled. Call it in a goroutine;
+// metrics are read from the default registry (where promauto counters live).
 func ServeMetrics(ctx context.Context, addr string, log *slog.Logger) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 
 	go func() {
