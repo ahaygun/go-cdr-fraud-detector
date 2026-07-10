@@ -16,6 +16,7 @@ const (
 
 	RuleVelocity         = "velocity"
 	RuleImpossibleTravel = "impossible_travel"
+	RuleIRSF             = "irsf"
 )
 
 type CallType string
