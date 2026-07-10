@@ -133,6 +133,118 @@ func (x *Cell) GetName() string {
 	return ""
 }
 
+type GetTariffRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Destination   string                 `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"` // callee MSISDN
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTariffRequest) Reset() {
+	*x = GetTariffRequest{}
+	mi := &file_cdr_v1_reference_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTariffRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTariffRequest) ProtoMessage() {}
+
+func (x *GetTariffRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cdr_v1_reference_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTariffRequest.ProtoReflect.Descriptor instead.
+func (*GetTariffRequest) Descriptor() ([]byte, []int) {
+	return file_cdr_v1_reference_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetTariffRequest) GetDestination() string {
+	if x != nil {
+		return x.Destination
+	}
+	return ""
+}
+
+type Tariff struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Prefix        string                 `protobuf:"bytes,1,opt,name=prefix,proto3" json:"prefix,omitempty"`
+	RatePerMin    float64                `protobuf:"fixed64,2,opt,name=rate_per_min,json=ratePerMin,proto3" json:"rate_per_min,omitempty"`
+	Premium       bool                   `protobuf:"varint,3,opt,name=premium,proto3" json:"premium,omitempty"`
+	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Tariff) Reset() {
+	*x = Tariff{}
+	mi := &file_cdr_v1_reference_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Tariff) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Tariff) ProtoMessage() {}
+
+func (x *Tariff) ProtoReflect() protoreflect.Message {
+	mi := &file_cdr_v1_reference_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Tariff.ProtoReflect.Descriptor instead.
+func (*Tariff) Descriptor() ([]byte, []int) {
+	return file_cdr_v1_reference_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Tariff) GetPrefix() string {
+	if x != nil {
+		return x.Prefix
+	}
+	return ""
+}
+
+func (x *Tariff) GetRatePerMin() float64 {
+	if x != nil {
+		return x.RatePerMin
+	}
+	return 0
+}
+
+func (x *Tariff) GetPremium() bool {
+	if x != nil {
+		return x.Premium
+	}
+	return false
+}
+
+func (x *Tariff) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 var File_cdr_v1_reference_proto protoreflect.FileDescriptor
 
 const file_cdr_v1_reference_proto_rawDesc = "" +
@@ -144,9 +256,18 @@ const file_cdr_v1_reference_proto_rawDesc = "" +
 	"\acell_id\x18\x01 \x01(\tR\x06cellId\x12\x10\n" +
 	"\x03lat\x18\x02 \x01(\x01R\x03lat\x12\x10\n" +
 	"\x03lon\x18\x03 \x01(\x01R\x03lon\x12\x12\n" +
-	"\x04name\x18\x04 \x01(\tR\x04name2<\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\"4\n" +
+	"\x10GetTariffRequest\x12 \n" +
+	"\vdestination\x18\x01 \x01(\tR\vdestination\"p\n" +
+	"\x06Tariff\x12\x16\n" +
+	"\x06prefix\x18\x01 \x01(\tR\x06prefix\x12 \n" +
+	"\frate_per_min\x18\x02 \x01(\x01R\n" +
+	"ratePerMin\x12\x18\n" +
+	"\apremium\x18\x03 \x01(\bR\apremium\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name2s\n" +
 	"\tReference\x12/\n" +
-	"\aGetCell\x12\x16.cdr.v1.GetCellRequest\x1a\f.cdr.v1.CellB;Z9github.com/ahaygun/go-cdr-fraud-detector/gen/cdr/v1;cdrv1b\x06proto3"
+	"\aGetCell\x12\x16.cdr.v1.GetCellRequest\x1a\f.cdr.v1.Cell\x125\n" +
+	"\tGetTariff\x12\x18.cdr.v1.GetTariffRequest\x1a\x0e.cdr.v1.TariffB;Z9github.com/ahaygun/go-cdr-fraud-detector/gen/cdr/v1;cdrv1b\x06proto3"
 
 var (
 	file_cdr_v1_reference_proto_rawDescOnce sync.Once
@@ -160,16 +281,20 @@ func file_cdr_v1_reference_proto_rawDescGZIP() []byte {
 	return file_cdr_v1_reference_proto_rawDescData
 }
 
-var file_cdr_v1_reference_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_cdr_v1_reference_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_cdr_v1_reference_proto_goTypes = []any{
-	(*GetCellRequest)(nil), // 0: cdr.v1.GetCellRequest
-	(*Cell)(nil),           // 1: cdr.v1.Cell
+	(*GetCellRequest)(nil),   // 0: cdr.v1.GetCellRequest
+	(*Cell)(nil),             // 1: cdr.v1.Cell
+	(*GetTariffRequest)(nil), // 2: cdr.v1.GetTariffRequest
+	(*Tariff)(nil),           // 3: cdr.v1.Tariff
 }
 var file_cdr_v1_reference_proto_depIdxs = []int32{
 	0, // 0: cdr.v1.Reference.GetCell:input_type -> cdr.v1.GetCellRequest
-	1, // 1: cdr.v1.Reference.GetCell:output_type -> cdr.v1.Cell
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
+	2, // 1: cdr.v1.Reference.GetTariff:input_type -> cdr.v1.GetTariffRequest
+	1, // 2: cdr.v1.Reference.GetCell:output_type -> cdr.v1.Cell
+	3, // 3: cdr.v1.Reference.GetTariff:output_type -> cdr.v1.Tariff
+	2, // [2:4] is the sub-list for method output_type
+	0, // [0:2] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -186,7 +311,7 @@ func file_cdr_v1_reference_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cdr_v1_reference_proto_rawDesc), len(file_cdr_v1_reference_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

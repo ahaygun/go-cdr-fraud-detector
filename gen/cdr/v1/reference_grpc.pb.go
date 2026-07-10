@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Reference_GetCell_FullMethodName = "/cdr.v1.Reference/GetCell"
+	Reference_GetCell_FullMethodName   = "/cdr.v1.Reference/GetCell"
+	Reference_GetTariff_FullMethodName = "/cdr.v1.Reference/GetTariff"
 )
 
 // ReferenceClient is the client API for Reference service.
@@ -27,11 +28,14 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // Reference is the subscriber-service's gRPC API: static reference data used to
-// enrich fraud checks. Faz 2 needs cell -> geo (for impossible-travel);
-// subscriber profile / plan / tariff lookups are added in a later phase.
+// enrich fraud checks.
+//   - GetCell    → cell geo (for impossible-travel)
+//   - GetTariff  → destination tariff (for IRSF spend tracking)
 type ReferenceClient interface {
 	// GetCell returns the geographic location of a cell tower.
 	GetCell(ctx context.Context, in *GetCellRequest, opts ...grpc.CallOption) (*Cell, error)
+	// GetTariff returns the tariff for a destination MSISDN (by dialing prefix).
+	GetTariff(ctx context.Context, in *GetTariffRequest, opts ...grpc.CallOption) (*Tariff, error)
 }
 
 type referenceClient struct {
@@ -52,16 +56,29 @@ func (c *referenceClient) GetCell(ctx context.Context, in *GetCellRequest, opts 
 	return out, nil
 }
 
+func (c *referenceClient) GetTariff(ctx context.Context, in *GetTariffRequest, opts ...grpc.CallOption) (*Tariff, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Tariff)
+	err := c.cc.Invoke(ctx, Reference_GetTariff_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ReferenceServer is the server API for Reference service.
 // All implementations must embed UnimplementedReferenceServer
 // for forward compatibility.
 //
 // Reference is the subscriber-service's gRPC API: static reference data used to
-// enrich fraud checks. Faz 2 needs cell -> geo (for impossible-travel);
-// subscriber profile / plan / tariff lookups are added in a later phase.
+// enrich fraud checks.
+//   - GetCell    → cell geo (for impossible-travel)
+//   - GetTariff  → destination tariff (for IRSF spend tracking)
 type ReferenceServer interface {
 	// GetCell returns the geographic location of a cell tower.
 	GetCell(context.Context, *GetCellRequest) (*Cell, error)
+	// GetTariff returns the tariff for a destination MSISDN (by dialing prefix).
+	GetTariff(context.Context, *GetTariffRequest) (*Tariff, error)
 	mustEmbedUnimplementedReferenceServer()
 }
 
@@ -74,6 +91,9 @@ type UnimplementedReferenceServer struct{}
 
 func (UnimplementedReferenceServer) GetCell(context.Context, *GetCellRequest) (*Cell, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetCell not implemented")
+}
+func (UnimplementedReferenceServer) GetTariff(context.Context, *GetTariffRequest) (*Tariff, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTariff not implemented")
 }
 func (UnimplementedReferenceServer) mustEmbedUnimplementedReferenceServer() {}
 func (UnimplementedReferenceServer) testEmbeddedByValue()                   {}
@@ -114,6 +134,24 @@ func _Reference_GetCell_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Reference_GetTariff_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTariffRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReferenceServer).GetTariff(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Reference_GetTariff_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReferenceServer).GetTariff(ctx, req.(*GetTariffRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Reference_ServiceDesc is the grpc.ServiceDesc for Reference service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -124,6 +162,10 @@ var Reference_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCell",
 			Handler:    _Reference_GetCell_Handler,
+		},
+		{
+			MethodName: "GetTariff",
+			Handler:    _Reference_GetTariff_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
