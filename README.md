@@ -106,10 +106,13 @@ service flags it, and the alert appears on `read-api`.
   state moves forward, so a failed emit can be retried instead of lost. Alerts
   are de-duplicated per `(rule, subscriber)` per window, so a burst yields one
   alert, not a flood.
-- **gRPC for enrichment, graceful degradation** — impossible-travel and IRSF
-  need reference data (cell geo, tariff), fetched synchronously over gRPC with a
-  timeout. If `subscriber-service` is down, those rules are skipped while
-  velocity and the pipeline carry on.
+- **Cached gRPC enrichment, graceful degradation** — impossible-travel and IRSF
+  need reference data (cell geo, tariff), fetched over gRPC with a timeout and
+  held in a short-TTL cache-aside layer (the data is static). Steady-state
+  lookups stay off the wire — this was the pipeline's main throughput bottleneck
+  — and cached keys keep the rules running through a brief enrichment outage. If
+  a lookup is uncached and `subscriber-service` is down, that rule is skipped
+  while velocity and the pipeline carry on.
 - **Async vs sync, on purpose** — Kafka decouples the high-volume event flow;
   gRPC serves the synchronous per-record lookup. The split is deliberate — the
   kind of decision a reviewer should be able to interrogate.
@@ -152,14 +155,17 @@ a single `fraud` replica — reproducible with `make loadtest` and
 
 | Metric | Result |
 |---|---|
-| Pipeline throughput (fraud, saturated) | **~890 events/s** |
+| Pipeline throughput (fraud, saturated) | **~1,700 events/s** — up from ~890 before the enrichment cache (≈1.9×) |
 | Pipeline latency at 300 events/s (produce → processed) | p50 ~6 ms · **p99 ~25 ms** |
 | read-api HTTP (`GET /alerts`, 50 VUs, k6) | **~12,000 req/s** · p95 ~7 ms · 0% errors |
 
-Throughput per replica is bounded by the fraud service's two synchronous gRPC
+Throughput per replica *was* bounded by the fraud service's two synchronous gRPC
 enrichment calls + Redis ops per record — the producer alone sustains ~533k/s,
-so it is the *processing* that costs, not the ingest. That is exactly what KEDA
-addresses: under load, fraud scales 1 → 3 for roughly triple the capacity.
+so it is the *processing* that costs, not the ingest. Caching that static
+enrichment (cache-aside — see [Design decisions](#design-decisions)) took the
+gRPC round-trips off the steady-state hot path and roughly doubled throughput
+(~890 → ~1,700 events/s); the bound is now Redis. KEDA addresses the rest: under
+load, fraud scales 1 → 3 for roughly triple the per-replica capacity.
 
 > ⚠️ Single-machine, local numbers — not a distributed benchmark; the machine and
 > commands are stated so you can reproduce them.

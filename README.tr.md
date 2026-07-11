@@ -105,9 +105,13 @@ flag'ler ve alert `read-api`'de görünür.
   üretilir, böylece başarısız bir emit kaybolmak yerine retry edilebilir.
   Alert'ler `(kural, abone)` başına pencere başına dedup'lanır; burst tek alert
   üretir, sel değil.
-- **Enrichment için gRPC, zarif düşüş** — impossible-travel ve IRSF referans veri
-  (hücre coğrafyası, tarife) ister; bunlar timeout'lu senkron gRPC ile alınır.
-  `subscriber-service` düşerse o kurallar atlanır; velocity ve pipeline devam eder.
+- **Cache'li gRPC enrichment, zarif düşüş** — impossible-travel ve IRSF referans
+  veri (hücre coğrafyası, tarife) ister; bunlar timeout'lu gRPC ile alınıp
+  kısa-TTL'li bir cache-aside katmanında tutulur (veri statik). Steady-state
+  lookup'lar tel üstüne çıkmaz — pipeline'ın ana darboğazı buydu — ve cache'li
+  key'ler kısa bir enrichment kesintisi boyunca kuralları çalışır tutar. Lookup
+  cache'te yoksa ve `subscriber-service` düştüyse o kural atlanır; velocity ve
+  pipeline devam eder.
 - **Bilinçli async vs sync** — Kafka yüksek-hacimli olay akışını ayrıştırır; gRPC
   senkron kayıt-başı lookup'ı sunar. Ayrım bilinçli — bir mülakatçının
   sorgulayabileceği türden bir karar.
@@ -151,14 +155,17 @@ ile tekrar üretilebilir:
 
 | Ölçüm | Sonuç |
 |---|---|
-| Pipeline throughput (fraud, doyurulmuş) | **~890 olay/s** |
+| Pipeline throughput (fraud, doyurulmuş) | **~1.700 olay/s** — enrichment cache öncesi ~890'dan (≈1.9×) |
 | Pipeline latency, 300 olay/s'de (üretim → işlenme) | p50 ~6 ms · **p99 ~25 ms** |
 | read-api HTTP (`GET /alerts`, 50 VU, k6) | **~12.000 istek/s** · p95 ~7 ms · %0 hata |
 
-Replica başına throughput'u, fraud servisinin kayıt-başı iki senkron gRPC
-enrichment çağrısı + Redis işlemleri sınırlar — producer tek başına ~533k/s
-sürdürüyor, yani maliyet *ingest* değil, *işleme*. KEDA tam da bunu çözer: yük
-altında fraud 1 → 3'e ölçeklenip kapasiteyi kabaca üçe katlar.
+Replica başına throughput'u *önceden* fraud servisinin kayıt-başı iki senkron
+gRPC enrichment çağrısı + Redis işlemleri sınırlıyordu — producer tek başına
+~533k/s sürdürüyor, yani maliyet *ingest* değil, *işleme*. O statik enrichment'ı
+cache'lemek (cache-aside; Tasarım kararları'na bak) gRPC round-trip'lerini hot
+path'ten çıkardı ve throughput'u kabaca ikiye katladı (~890 → ~1.700 olay/s);
+darboğaz artık Redis. Gerisini KEDA çözer: yük altında fraud 1 → 3'e ölçeklenip
+replica-başı kapasiteyi kabaca üçe katlar.
 
 > ⚠️ Tek makine, local sayılar — dağıtık benchmark değil; makine ve komutlar
 > şeffaf, tekrar üretebilirsin.
