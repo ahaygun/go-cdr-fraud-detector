@@ -102,6 +102,12 @@ service flags it, and the alert appears on `read-api`.
   offsets manually (only after processing), dedups on `record_id`, and uses
   `record_id` as the sliding-window member so a redelivered record cannot inflate
   a count. Alerts are stored with `ON CONFLICT DO NOTHING`.
+- **Poison messages don't block the partition** — a record is retried a bounded
+  number of times; if it can never be processed it is routed to a dead-letter
+  topic (`cdr.dlq`) with the failure reason, then the offset is committed so the
+  consumer moves on. If the dead-letter write itself fails, the offset is left
+  uncommitted for redelivery rather than dropping the record.
+
 - **Emit before advancing state** — an alert is emitted *before* a rule's Redis
   state moves forward, so a failed emit can be retried instead of lost. Alerts
   are de-duplicated per `(rule, subscriber)` per window, so a burst yields one

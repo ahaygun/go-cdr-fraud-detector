@@ -101,6 +101,12 @@ flag'ler ve alert `read-api`'de görünür.
   manuel (yalnızca işledikten sonra) commit eder, `record_id` ile dedup yapar ve
   kayan pencerenin üyesi olarak `record_id` kullanır, böylece tekrar teslim edilen
   bir kayıt sayacı şişiremez. Alert'ler `ON CONFLICT DO NOTHING` ile yazılır.
+- **Poison mesaj partition'ı bloklamaz** — bir kayıt sınırlı sayıda yeniden
+  denenir; hiç işlenemiyorsa hata nedeniyle birlikte bir dead-letter topic'ine
+  (`cdr.dlq`) yönlendirilir, sonra offset commit'lenip devam edilir. Dead-letter
+  yazımının kendisi başarısız olursa, kaydı düşürmek yerine offset commit'lenmez
+  (tekrar teslim edilir).
+
 - **Önce emit, sonra state** — alert, kuralın Redis state'i ilerlemeden *önce*
   üretilir, böylece başarısız bir emit kaybolmak yerine retry edilebilir.
   Alert'ler `(kural, abone)` başına pencere başına dedup'lanır; burst tek alert
