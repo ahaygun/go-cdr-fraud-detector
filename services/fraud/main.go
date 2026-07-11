@@ -57,11 +57,12 @@ func main() {
 		SpendThreshold: float64(atoi(platform.Getenv("IRSF_SPEND_THRESHOLD", "50"))),
 	}
 	alertCooldown := time.Duration(atoi(platform.Getenv("ALERT_COOLDOWN_SEC", "60"))) * time.Second
+	refCacheTTL := time.Duration(atoi(platform.Getenv("REFERENCE_CACHE_TTL_SEC", "300"))) * time.Second
 
 	log.Info("starting", "kafka_brokers", brokers, "redis_addr", redisAddr,
 		"subscriber_addr", subscriberAddr, "velocity_threshold", vel.Threshold,
 		"impossible_travel_max_kmh", travel.MaxSpeedKmh, "irsf_threshold", irsf.SpendThreshold,
-		"alert_cooldown", alertCooldown.String())
+		"alert_cooldown", alertCooldown.String(), "reference_cache_ttl", refCacheTTL.String())
 
 	go platform.ServeMetrics(ctx, platform.Getenv("METRICS_ADDR", ":9100"), log)
 
@@ -101,6 +102,8 @@ func main() {
 		irsfWindowMs:  int64(irsf.WindowSeconds) * 1000,
 		seenTTL:       time.Duration(vel.WindowSeconds*3) * time.Second,
 		alertCooldown: alertCooldown,
+		cellCache:     newRefCache[cellGeo](refCacheTTL),
+		tariffCache:   newRefCache[tariffInfo](refCacheTTL),
 	}
 
 	log.Info("consuming", "topic", cdr.TopicRaw)
@@ -149,6 +152,8 @@ type processor struct {
 	irsfWindowMs  int64
 	seenTTL       time.Duration
 	alertCooldown time.Duration
+	cellCache     *refCache[cellGeo]
+	tariffCache   *refCache[tariffInfo]
 }
 
 func (p *processor) handle(ctx context.Context, value []byte) error {
@@ -193,18 +198,17 @@ func (p *processor) checkVelocity(ctx context.Context, rec cdr.CDR) error {
 }
 
 func (p *processor) checkImpossibleTravel(ctx context.Context, rec cdr.CDR) error {
-	// Synchronous enrichment: fetch the current cell's coordinates over gRPC.
-	// If the enrichment service is unavailable, skip this rule (graceful
-	// degradation) — velocity and the pipeline are unaffected.
-	cctx, cancel := context.WithTimeout(ctx, grpcTimeout)
-	defer cancel()
-	cell, err := p.ref.GetCell(cctx, &cdrv1.GetCellRequest{CellId: rec.CellID})
+	// Synchronous enrichment: the current cell's coordinates. Served from a
+	// short-TTL cache-aside layer (the data is static) so steady-state lookups
+	// stay off the wire; a miss falls back to gRPC. If it is unavailable and
+	// uncached, skip this rule (graceful degradation).
+	cg, err := p.getCellGeo(ctx, rec.CellID)
 	if err != nil {
 		p.log.Warn("impossible-travel skipped: enrichment unavailable", "err", err, "caller", rec.CallerMSISDN)
 		return nil
 	}
 
-	current := lastLoc{Lat: cell.GetLat(), Lon: cell.GetLon(), At: rec.StartTime}
+	current := lastLoc{Lat: cg.lat, Lon: cg.lon, At: rec.StartTime}
 	last, ok, err := getLastLocation(ctx, p.rdb, rec.CallerMSISDN)
 	if err != nil {
 		return err
@@ -229,19 +233,18 @@ func (p *processor) checkImpossibleTravel(ctx context.Context, rec cdr.CDR) erro
 }
 
 func (p *processor) checkIRSF(ctx context.Context, rec cdr.CDR) error {
-	// Enrichment: is the destination a premium/international number, and at what rate?
-	cctx, cancel := context.WithTimeout(ctx, grpcTimeout)
-	defer cancel()
-	t, err := p.ref.GetTariff(cctx, &cdrv1.GetTariffRequest{Destination: rec.CalleeMSISDN})
+	// Enrichment: is the destination premium, and at what rate? Cache-aside over
+	// the static tariff catalog, same as the cell lookup above.
+	ti, err := p.getTariff(ctx, rec.CalleeMSISDN)
 	if err != nil {
 		p.log.Warn("irsf skipped: enrichment unavailable", "err", err, "caller", rec.CallerMSISDN)
 		return nil
 	}
-	if !t.GetPremium() {
+	if !ti.premium {
 		return nil // only premium destinations accrue IRSF spend
 	}
 
-	cost := float64(rec.DurationSec) / 60.0 * t.GetRatePerMin()
+	cost := float64(rec.DurationSec) / 60.0 * ti.ratePerMin
 	spend, err := premiumSpendInWindow(ctx, p.rdb, "spend:"+rec.CallerMSISDN,
 		rec.StartTime.UnixMilli(), p.irsfWindowMs, rec.RecordID, cost)
 	if err != nil {
@@ -252,6 +255,33 @@ func (p *processor) checkIRSF(ctx context.Context, rec cdr.CDR) error {
 		return p.maybeEmit(ctx, rec, cdr.RuleIRSF, score, evidence)
 	}
 	return nil
+}
+
+// getCellGeo / getTariff wrap the gRPC reference lookups in the cache-aside
+// layer: a fresh cache hit returns immediately; a miss makes the (timeout-bound)
+// gRPC call and caches the result.
+func (p *processor) getCellGeo(ctx context.Context, cellID string) (cellGeo, error) {
+	return p.cellCache.get(cellID, time.Now(), func() (cellGeo, error) {
+		cctx, cancel := context.WithTimeout(ctx, grpcTimeout)
+		defer cancel()
+		cell, err := p.ref.GetCell(cctx, &cdrv1.GetCellRequest{CellId: cellID})
+		if err != nil {
+			return cellGeo{}, err
+		}
+		return cellGeo{lat: cell.GetLat(), lon: cell.GetLon()}, nil
+	})
+}
+
+func (p *processor) getTariff(ctx context.Context, dest string) (tariffInfo, error) {
+	return p.tariffCache.get(dest, time.Now(), func() (tariffInfo, error) {
+		cctx, cancel := context.WithTimeout(ctx, grpcTimeout)
+		defer cancel()
+		t, err := p.ref.GetTariff(cctx, &cdrv1.GetTariffRequest{Destination: dest})
+		if err != nil {
+			return tariffInfo{}, err
+		}
+		return tariffInfo{premium: t.GetPremium(), ratePerMin: t.GetRatePerMin()}, nil
+	})
 }
 
 // maybeEmit emits a fraud alert, but at most once per (rule, subscriber) within
