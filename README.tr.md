@@ -12,6 +12,12 @@ mikroservislerin arkasında.
 > tespit eder. Bu proje o problemin çekirdeğine Go-native, açık bir bakış:
 > akan CDR trafiğinde fraud'u temiz ve gözlemlenebilir şekilde yakalamak.
 
+## Canlı demo — karar motorunu tarayıcında dene
+
+**[ahaygun.github.io/go-cdr-fraud-detector](https://ahaygun.github.io/go-cdr-fraud-detector/)** — üç fraud kuralı **WebAssembly**'ye derlenip, üretip enjekte edebileceğin sentetik çağrılar üzerinde canlı çalışır. Eşikleri kaydır, fraud'un gerçek zamanda yakalanışını izle.
+
+**Gerçek kural kodunu** (`internal/rules`) değiştirmeden çalıştırır; yalnızca abone-başı state deposu (pipeline'da Redis) bellek-içi map'lerle değiştirilir ve enrichment yerel kataloglardan gelir. Yani bu, **karar motorunun** demosudur — dağıtık sistemin değil; tarayıcıda Kafka, Redis ya da mikroservis yoktur. Tam event-driven pipeline'ı README'nin geri kalanı anlatır.
+
 ## Öne çıkanlar
 
 - **Event-driven pipeline** — generator CDR'ları Kafka'ya üretir; bağımsız
@@ -170,6 +176,7 @@ GitHub Actions her push'ta gofmt, build, vet ve testleri koşar.
 
 ```
 cmd/loadgen         async Kafka yük üreteci (throughput/latency testleri)
+cmd/playground      fraud kuralları WebAssembly'ye derlenmiş (tarayıcı-içi demo)
 internal/cdr        olay şeması (CDR, FraudAlert)
 internal/stream     Kafka yardımcıları (key'li producer, manuel-commit consumer)
 internal/rules      üç fraud kuralı (saf, table-tested)
@@ -180,6 +187,8 @@ services/           generator · fraud · subscriber · read-api
 proto/              gRPC sözleşmesi (subscriber Reference servisi)
 deploy/             Dockerfile, docker-compose, Helm chart, observability
 loadtest/           k6 script'i
+web/                tarayıcı-içi demo sayfası (tasarım kabuğu + wasm yükleyici)
+docs/               GitHub Pages için derlenmiş demo (make wasm) + kanıt dosyaları
 ```
 
 ## Lisans

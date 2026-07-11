@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: help build vet test lint tidy proto up up-infra up-observability down logs ps clean \
+.PHONY: help build vet test lint tidy proto wasm up up-infra up-observability down logs ps clean \
         k8s-images k8s-up k8s-load k8s-unload k8s-down loadtest
 
 KIND_CLUSTER := cdr
@@ -29,6 +29,13 @@ tidy: ## go mod tidy
 
 proto: ## proto'dan Go + gRPC kodu üret (buf gerekir)
 	buf generate
+
+wasm: ## Karar motorunu WebAssembly'ye derle → docs/ (GitHub Pages demo'su)
+	@mkdir -p docs
+	GOOS=js GOARCH=wasm go build -o docs/main.wasm ./cmd/playground
+	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" docs/wasm_exec.js
+	cp web/index.html docs/index.html
+	@echo "→ docs/ hazir: index.html + main.wasm + wasm_exec.js (GitHub Pages'i docs/'tan yayinla)"
 
 loadtest: ## Pipeline'ı doyur (RATE=0) — throughput/p99'u Grafana/Prometheus'tan oku
 	RATE=$${RATE:-0} DURATION=$${DURATION:-30} go run ./cmd/loadgen

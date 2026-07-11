@@ -11,6 +11,12 @@ milliseconds — behind clean, separately-deployable microservices.
 > This project is an open, Go-native take on the core of that problem:
 > catch fraud in live CDR traffic, cleanly and observably.
 
+## Live demo — try the decision engine in your browser
+
+**[ahaygun.github.io/go-cdr-fraud-detector](https://ahaygun.github.io/go-cdr-fraud-detector/)** — the three fraud rules, compiled to **WebAssembly** and running live over synthetic calls you can generate and inject. Move the thresholds and watch fraud get flagged in real time.
+
+It runs the **real rule code** (`internal/rules`) unchanged; only the per-subscriber state store (Redis in the pipeline) is swapped for in-memory maps, and enrichment is served from the local catalogs. So it is a demo of the **decision engine**, not the distributed system — there is no Kafka, Redis or microservices in the browser. The full event-driven pipeline is what the rest of this README describes.
+
 ## Features
 
 - **Event-driven pipeline** — a generator produces CDRs onto Kafka; independent
@@ -171,6 +177,7 @@ GitHub Actions runs gofmt, build, vet and the tests on every push.
 
 ```
 cmd/loadgen         async Kafka load generator (throughput/latency tests)
+cmd/playground      the fraud rules compiled to WebAssembly (the in-browser demo)
 internal/cdr        event schema (CDR, FraudAlert)
 internal/stream     Kafka helpers (keyed producer, manual-commit consumer)
 internal/rules      the three fraud rules (pure, table-tested)
@@ -181,6 +188,8 @@ services/           generator · fraud · subscriber · read-api
 proto/              gRPC contract (subscriber Reference service)
 deploy/             Dockerfile, docker-compose, Helm chart, observability
 loadtest/           k6 script
+web/                the in-browser demo page (design shell + wasm loader)
+docs/               built demo for GitHub Pages (make wasm) + evidence assets
 ```
 
 ## License

@@ -1,0 +1,670 @@
+<meta charset="utf-8" />
+<title>go-cdr-fraud-detector — Decision Engine Demo</title>
+<meta name="theme-color" content="#262a30" />
+<style>
+  :root {
+    /* ── Ahmet's brand DNA (from the CV) ── */
+    --bg: #262a30;
+    --bg-2: #2f343b;
+    --bg-3: #3a4048;
+    --line: #444a54;
+    --line-2: #525863;
+    --ink: #f2f1ee;
+    --ink-2: #cdccc7;
+    --muted: #949aa3;
+    --accent: #ff8a4d;
+    --accent-2: #ffc27d;
+    --accent-rgb: 255,138,77;
+    --on-accent: #241206;
+
+    /* ── Semantic: one identity per fraud rule (stable across palettes) ── */
+    --velocity: #ff9d4d;   --velocity-rgb: 255,157,77;
+    --travel:   #f2778d;   --travel-rgb: 242,119,141;
+    --irsf:     #3fc7e0;   --irsf-rgb: 63,199,224;
+    --clear:    #7fc9a3;   --clear-rgb: 127,201,163;
+
+    --display: "Bricolage Grotesque", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --sans: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+
+    --max: 1360px;
+    --pad: clamp(16px, 3.5vw, 44px);
+    --r: 14px;
+    --r-sm: 10px;
+  }
+
+  body[data-palette="ocean"] {
+    --bg: #111c27; --bg-2: #1a2732; --bg-3: #22323f;
+    --line: #2d4150; --line-2: #3a5263;
+    --ink: #eef4f5; --ink-2: #c8d5d8; --muted: #93a7af;
+    --accent: #4ecfa0; --accent-2: #9fe8dd;
+    --accent-rgb: 78,207,160; --on-accent: #062018;
+  }
+
+  * , *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+    background-image:
+      radial-gradient(1100px 780px at 96% -14%, rgba(var(--accent-rgb),.16), transparent 58%),
+      radial-gradient(900px 700px at -10% 6%, rgba(var(--accent-rgb),.06), transparent 55%),
+      radial-gradient(1500px 1050px at 50% 128%, rgba(0,0,0,.34), transparent 62%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: .20;
+    mix-blend-mode: overlay;
+    z-index: 1;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.3 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+
+  ::selection { background: var(--accent); color: var(--bg); }
+  a { color: inherit; text-decoration: none; }
+
+  .shell {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 18px var(--pad) 56px;
+    position: relative;
+    z-index: 2;
+  }
+
+  /* ─────────── Header ─────────── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--line-2);
+    background: linear-gradient(180deg, rgba(58,64,72,.55), rgba(38,42,48,.76));
+    backdrop-filter: blur(16px) saturate(1.25);
+    -webkit-backdrop-filter: blur(16px) saturate(1.25);
+    border-radius: 999px;
+    position: sticky;
+    top: 14px;
+    z-index: 50;
+    box-shadow: 0 10px 30px rgba(0,0,0,.4), 0 1px 0 rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.07);
+    animation: drop .7s cubic-bezier(.2,.7,.2,1) both;
+  }
+  @keyframes drop { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
+
+  .brand { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .mono-mark {
+    width: 32px; height: 32px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: var(--on-accent);
+    display: grid; place-items: center;
+    font-family: var(--display); font-weight: 800; font-size: 15px; letter-spacing: -.03em;
+    box-shadow: 0 4px 14px rgba(var(--accent-rgb),.35);
+  }
+  .brand .name { font-family: var(--mono); font-size: 13px; letter-spacing: .01em; color: var(--ink); font-weight: 500; white-space: nowrap; }
+  .chip-live {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--velocity); padding: 4px 9px; border: 1px solid rgba(var(--velocity-rgb),.4);
+    border-radius: 999px; background: rgba(var(--velocity-rgb),.08); white-space: nowrap;
+  }
+  .chip-live .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--velocity); box-shadow: 0 0 0 0 rgba(var(--velocity-rgb),.6); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%{ box-shadow: 0 0 0 0 rgba(var(--velocity-rgb),.55);} 70%{ box-shadow: 0 0 0 7px rgba(var(--velocity-rgb),0);} 100%{ box-shadow: 0 0 0 0 rgba(var(--velocity-rgb),0);} }
+
+  .topbar .right { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+
+  /* Toggles — bigger, CV-style boxes */
+  .lang-toggle { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line-2); border-radius: 999px; background: rgba(0,0,0,.2); }
+  .lang-toggle button { appearance: none; background: none; border: 0; cursor: pointer; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; color: var(--muted); padding: 5px 10px; border-radius: 999px; transition: color .2s ease, background .2s ease; }
+  .lang-toggle button.is-active { color: var(--on-accent); background: var(--accent); }
+  .lang-toggle button:hover:not(.is-active) { color: var(--ink); }
+  .lang-toggle button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+
+  .theme-toggle { display: inline-flex; gap: 6px; padding: 4px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--bg); }
+  .theme-toggle .sw { appearance: none; width: 46px; height: 28px; padding: 0; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform .15s ease, box-shadow .2s ease; }
+  .theme-toggle .sw svg { width: 20px; height: 20px; display: block; }
+  .theme-toggle .sw:hover { transform: translateY(-1px); }
+  .theme-toggle .sw.is-active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--ink); }
+  .theme-toggle .sw:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .sw--amber { background: linear-gradient(135deg, #ff8a4d, #ffc27d); color: #3a1a08; }
+  .sw--ocean { background: linear-gradient(135deg, #3fbf90, #9fe8dd); color: #062018; }
+
+  .ghost {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .04em;
+    color: var(--ink-2); padding: 8px 12px; border: 1px solid var(--line-2);
+    border-radius: 999px; transition: border-color .2s ease, color .2s ease, background .2s ease;
+  }
+  .ghost:hover { border-color: rgba(var(--accent-rgb),.55); color: var(--ink); background: rgba(var(--accent-rgb),.06); }
+  .ghost svg { width: 15px; height: 15px; }
+
+  /* ─────────── Hero — the project is the headline ─────────── */
+  .lede { margin: 36px 4px 6px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px; display: flex; align-items: center; gap: 12px; }
+  .eyebrow::after { content: ""; height: 1px; flex: 1; background: linear-gradient(90deg, rgba(var(--accent-rgb),.5), transparent); }
+  h1 { font-family: var(--mono); font-weight: 700; font-size: clamp(26px, 4.4vw, 44px); line-height: 1.04; letter-spacing: -.02em; margin: 0; color: var(--ink); }
+  h1 a { transition: color .2s ease; }
+  h1 a:hover { color: var(--accent); }
+  h1 .dash { color: var(--accent); }
+  .what { color: var(--ink); margin: 18px 0 0; max-width: 78ch; font-size: 16.5px; line-height: 1.6; }
+  .what b { color: var(--accent-2); font-weight: 600; }
+  .notlive { color: var(--muted); margin: 12px 0 0; max-width: 78ch; font-size: 13.5px; }
+  .notlive a { color: var(--accent); border-bottom: 1px solid rgba(var(--accent-rgb),.4); }
+
+  .stack { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 0; padding: 0; }
+  .stack li { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 12.5px; letter-spacing: .01em; color: var(--ink-2); padding: 7px 12px; border: 1px solid var(--line-2); border-radius: 999px; background: rgba(0,0,0,.18); cursor: default; transition: border-color .2s ease, background .2s ease, color .2s ease, transform .12s ease; }
+  .stack li:hover { border-color: rgba(var(--accent-rgb),.55); background: rgba(var(--accent-rgb),.09); color: var(--ink); transform: translateY(-2px); }
+  .stack .ico { width: 16px; height: 16px; fill: currentColor; opacity: .95; }
+
+  .statsbar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 22px 4px 26px; }
+  .metric { border: 1px solid var(--line); background: linear-gradient(180deg, rgba(58,64,72,.32), rgba(38,42,48,.5)); border-radius: var(--r); padding: 14px 15px; position: relative; overflow: hidden; }
+  .metric .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--muted); }
+  .metric .v { font-family: var(--mono); font-weight: 500; font-size: 28px; letter-spacing: -.02em; color: var(--ink); margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .metric .v small { font-size: 12.5px; color: var(--muted); font-weight: 400; letter-spacing: 0; }
+  .metric.spark canvas { position: absolute; inset: auto 0 0 0; width: 100%; height: 34px; opacity: .9; }
+
+  /* ─────────── Console grid ─────────── */
+  .grid { display: grid; grid-template-columns: 320px 1fr 344px; gap: 16px; align-items: stretch; }
+  /* Decision-rules column drives the height (natural, no scroll); the other two stretch to match and scroll internally */
+  #ctlPanel, #streamPanel, #alertsPanel { display: flex; flex-direction: column; }
+  #streamPanel .body { flex: 1; min-height: 0; position: relative; }
+  #alertsPanel .body { flex: 1; min-height: 0; position: relative; padding: 0; }
+
+  .panel { border: 1px solid var(--line); background: linear-gradient(180deg, rgba(47,52,59,.55), rgba(38,42,48,.62)); border-radius: var(--r); box-shadow: 0 12px 34px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.04); }
+  .panel > header { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .panel > header .t { font-family: var(--mono); font-size: 12px; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-2); }
+  .panel > header .count { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .panel .body { padding: 15px 16px; }
+
+  /* Rule cards */
+  .rule { --c: var(--velocity); --c-rgb: var(--velocity-rgb); border: 1px solid var(--line); border-left: 3px solid var(--c); border-radius: var(--r-sm); padding: 13px 14px; background: rgba(0,0,0,.14); transition: box-shadow .3s ease, border-color .3s ease, transform .3s ease; }
+  .rule + .rule { margin-top: 12px; }
+  .rule.fire { border-color: rgba(var(--c-rgb),.6); box-shadow: 0 0 0 1px rgba(var(--c-rgb),.4), 0 8px 24px rgba(var(--c-rgb),.22); transform: translateY(-1px); }
+  .rule .top { display: flex; align-items: center; gap: 8px; }
+  .rule .rname { font-family: var(--mono); font-size: 13px; letter-spacing: .03em; color: var(--c); font-weight: 500; text-transform: uppercase; }
+  .rule .rc { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums; background: rgba(var(--c-rgb),.14); border: 1px solid rgba(var(--c-rgb),.3); border-radius: 999px; padding: 1px 9px; }
+  .rule .desc { color: var(--ink-2); font-size: 13px; margin: 8px 0 12px; line-height: 1.5; }
+  .rule .ctl { display: flex; align-items: center; gap: 10px; }
+  .rule .ctl label { font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  .rule .ctl output { font-family: var(--mono); font-size: 12.5px; color: var(--ink); margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; flex: 1; min-width: 0; border-radius: 999px; background: linear-gradient(90deg, var(--c) var(--fill,50%), var(--line-2) var(--fill,50%)); cursor: pointer; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--c); border: 2px solid var(--bg); box-shadow: 0 2px 6px rgba(0,0,0,.4); cursor: pointer; }
+  input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border: 2px solid var(--bg); border-radius: 50%; background: var(--c); cursor: pointer; }
+  input[type=range]:focus-visible { outline: 2px solid var(--c); outline-offset: 3px; }
+
+  .subhead { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 20px 0 11px; }
+  .injects { display: grid; gap: 9px; }
+  .inject { --c: var(--velocity); --c-rgb: var(--velocity-rgb); text-align: left; cursor: pointer; display: flex; align-items: center; gap: 11px; font-family: var(--sans); color: var(--ink); padding: 11px 13px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: rgba(0,0,0,.16); transition: border-color .2s ease, background .2s ease, transform .1s ease; }
+  .inject:hover { border-color: rgba(var(--c-rgb),.6); background: rgba(var(--c-rgb),.09); }
+  .inject:active { transform: scale(.985); }
+  .inject:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+  .inject .ic { width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; display: grid; place-items: center; background: rgba(var(--c-rgb),.16); color: var(--c); font-family: var(--mono); font-weight: 600; font-size: 15px; }
+  .inject .lab b { display: block; font-family: var(--mono); font-size: 12.5px; letter-spacing: .02em; text-transform: uppercase; color: var(--c); font-weight: 500; }
+  .inject .lab span { color: var(--muted); font-size: 12.5px; }
+
+  /* Live stream */
+  #streamPanel .body { padding: 0; }
+  .stream { position: absolute; inset: 0; overflow: hidden; }
+  .stream::after { content: ""; position: absolute; inset: auto 0 0 0; height: 46px; background: linear-gradient(180deg, transparent, rgba(38,42,48,.7)); pointer-events: none; }
+  .row { display: grid; grid-template-columns: 66px 132px 1fr auto; gap: 11px; align-items: center; padding: 9px 16px; border-bottom: 1px solid rgba(68,74,84,.5); font-family: var(--mono); font-size: 13px; animation: slideIn .35s cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(-8px); background: rgba(var(--accent-rgb),.06); } to { opacity: 1; transform: none; } }
+  .row .ts { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .row .msisdn { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .row .meta { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .meta b { color: var(--ink-2); font-weight: 500; }
+  .row .st { justify-self: end; font-size: 10px; letter-spacing: .09em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+  .row .st.clear { color: var(--clear); border: 1px solid rgba(var(--clear-rgb),.28); }
+  .row.flag { --c-rgb: var(--velocity-rgb); background: linear-gradient(90deg, rgba(var(--c-rgb),.10), transparent 70%); }
+  .row.flag .st { color: #fff; background: rgba(var(--c-rgb),.9); border: 1px solid transparent; font-weight: 600; }
+  .row.flag .msisdn { color: var(--ink); }
+
+  /* Alerts timeline */
+  .alerts { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 15px 16px; }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 28px 10px; font-family: var(--mono); letter-spacing: .03em; }
+  .alert { --c: var(--velocity); --c-rgb: var(--velocity-rgb); border: 1px solid var(--line); border-left: 3px solid var(--c); border-radius: var(--r-sm); padding: 11px 13px; background: rgba(0,0,0,.16); animation: alIn .4s cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes alIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+  .alert .ah { display: flex; align-items: center; gap: 8px; }
+  .alert .rn { font-family: var(--mono); font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--c); font-weight: 500; }
+  .alert .sc { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink); background: rgba(var(--c-rgb),.16); border-radius: 999px; padding: 2px 8px; font-variant-numeric: tabular-nums; }
+  .alert .reason { color: var(--ink); font-size: 13.5px; margin: 7px 0 6px; line-height: 1.45; }
+  .alert .amsi { font-family: var(--mono); font-size: 11.5px; color: var(--muted); display: flex; gap: 8px; font-variant-numeric: tabular-nums; }
+
+  /* Geo map */
+  #geoWrap { position: relative; }
+  #geo { display: block; width: 100%; height: 236px; }
+  #geoWrap .cap { position: absolute; left: 13px; bottom: 10px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .11em; text-transform: uppercase; color: var(--muted); }
+
+  /* Footer / honesty */
+  footer { margin-top: 30px; border: 1px solid var(--line); border-radius: var(--r); padding: 22px 24px; background: linear-gradient(180deg, rgba(47,52,59,.4), rgba(38,42,48,.5)); display: grid; grid-template-columns: 1fr auto; gap: 22px; align-items: center; }
+  .disclaim { font-size: 13.5px; color: var(--ink-2); line-height: 1.6; max-width: 82ch; }
+  .disclaim .tag { font-family: var(--mono); font-size: 10px; letter-spacing: .13em; text-transform: uppercase; color: var(--accent); border: 1px solid rgba(var(--accent-rgb),.4); border-radius: 999px; padding: 3px 9px; margin-right: 9px; white-space: nowrap; }
+  .disclaim b { color: var(--ink); font-weight: 600; }
+  .disclaim a { color: var(--accent); border-bottom: 1px solid rgba(var(--accent-rgb),.4); }
+  .sig { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.7; white-space: nowrap; }
+  .sig b { color: var(--ink-2); font-weight: 500; }
+
+  #geoPanel { margin-top: 16px; }
+
+  /* ─────────── Responsive ─────────── */
+  @media (max-width: 1120px) {
+    .grid { grid-template-columns: 300px 1fr; }
+    #alertsPanel { grid-column: 1 / -1; height: 340px; }
+  }
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: 1fr; }
+    #streamPanel { height: 520px; }
+    #alertsPanel { height: 420px; }
+  }
+  @media (max-width: 560px) {
+    .brand .name { display: none; }
+    .statsbar { grid-template-columns: 1fr 1fr; }
+    .metric.spark { grid-column: 1 / -1; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .05ms !important; }
+  }
+</style>
+
+<div class="shell">
+
+  <!-- ── Header ── -->
+  <div class="topbar">
+    <span class="brand">
+      <span class="mono-mark">AH</span>
+      <span class="name">go-cdr-fraud-detector</span>
+    </span>
+    <span class="chip-live"><span class="dot"></span><span data-en="live demo">canlı demo</span></span>
+    <span class="right">
+      <span class="lang-toggle" role="group" aria-label="Language">
+        <button type="button" data-lang="tr" class="is-active">TR</button>
+        <button type="button" data-lang="en">EN</button>
+      </span>
+      <span class="theme-toggle" role="group" aria-label="Color theme">
+        <button type="button" class="sw sw--amber is-active" data-pal="amber" aria-label="Amber theme" title="Amber (warm)">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+        </button>
+        <button type="button" class="sw sw--ocean" data-pal="ocean" aria-label="Ocean theme" title="Ocean (cool)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 1.3 0 1.9-.5 2.5-1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 1.3 0 1.9-.5 2.5-1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 1.3 0 1.9-.5 2.5-1"/></svg>
+        </button>
+      </span>
+      <a class="ghost" href="https://github.com/ahaygun/go-cdr-fraud-detector" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </span>
+  </div>
+
+  <!-- ── Hero: the project is the headline ── -->
+  <div class="lede">
+      <p class="eyebrow" data-en="Decision-engine demo">Karar motoru demosu</p>
+      <h1><a href="https://github.com/ahaygun/go-cdr-fraud-detector" target="_blank" rel="noopener">go<span class="dash">-</span>cdr<span class="dash">-</span>fraud<span class="dash">-</span>detector</a></h1>
+      <p class="what" data-en="A &lt;b&gt;real, open-source&lt;/b&gt; event-driven telecom &lt;b&gt;fraud-detection system&lt;/b&gt; in Go — a Kafka pipeline, gRPC enrichment and Kubernetes autoscaling. This page runs its &lt;b&gt;decision engine&lt;/b&gt; live: the three rules that decide fraud in real time, right in your browser."><b>Çalışan, açık kaynak</b> bir event-driven telekom <b>fraud-tespit sistemi</b> — Go ile; Kafka pipeline, gRPC zenginleştirme ve Kubernetes autoscaling. Bu sayfa onun <b>karar motorunu</b> canlı çalıştırır: fraud'u gerçek zamanda belirleyen üç kural, doğrudan tarayıcında.</p>
+      <p class="notlive" data-en="The full distributed pipeline isn't here — it's &lt;a href=&quot;https://github.com/ahaygun/go-cdr-fraud-detector&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;published on GitHub&lt;/a&gt;. This is a presentation of its decision mechanism.">Dağıtık pipeline'ın kendisi burada değil — o, <a href="https://github.com/ahaygun/go-cdr-fraud-detector" target="_blank" rel="noopener">GitHub'da yayında</a>. Bu, karar mekanizmasının bir sunumu.</p>
+      <ul class="stack">
+        <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M1.811 10.231c-.047 0-.058-.023-.035-.059l.246-.315c.023-.035.081-.058.128-.058h4.172c.046 0 .058.035.035.07l-.199.303c-.023.036-.082.07-.117.07zM.047 11.306c-.047 0-.059-.023-.035-.058l.245-.316c.023-.035.082-.058.129-.058h5.328c.047 0 .07.035.058.07l-.093.28c-.012.047-.058.07-.105.07zm2.828 1.075c-.047 0-.059-.035-.035-.07l.163-.292c.023-.035.07-.07.117-.07h2.337c.047 0 .07.035.07.082l-.023.28c0 .047-.047.082-.082.082zm12.129-2.36c-.736.187-1.239.327-1.963.514-.176.046-.187.058-.34-.117-.174-.199-.303-.327-.548-.444-.737-.362-1.45-.257-2.115.175-.795.514-1.204 1.274-1.192 2.22.011.935.654 1.706 1.577 1.835.795.105 1.46-.175 1.987-.77.105-.13.198-.27.315-.434H10.47c-.245 0-.304-.152-.222-.35.152-.362.432-.97.596-1.274a.315.315 0 01.292-.187h4.253c-.023.316-.023.631-.07.947a4.983 4.983 0 01-.958 2.29c-.841 1.11-1.94 1.8-3.33 1.986-1.145.152-2.209-.07-3.143-.77-.865-.655-1.356-1.52-1.484-2.595-.152-1.274.222-2.419.993-3.424.83-1.086 1.928-1.776 3.272-2.02 1.098-.2 2.15-.07 3.096.571.62.41 1.063.97 1.356 1.648.07.105.023.164-.117.2m3.868 6.461c-1.064-.024-2.034-.328-2.852-1.029a3.665 3.665 0 01-1.262-2.255c-.21-1.32.152-2.489.947-3.529.853-1.122 1.881-1.706 3.272-1.95 1.192-.21 2.314-.095 3.33.595.923.63 1.496 1.484 1.648 2.605.198 1.578-.257 2.863-1.344 3.962-.771.783-1.718 1.273-2.805 1.495-.315.06-.63.07-.934.106zm2.78-4.72c-.011-.153-.011-.27-.034-.387-.21-1.157-1.274-1.81-2.384-1.554-1.087.245-1.788.935-2.045 2.033-.21.912.234 1.835 1.075 2.21.643.28 1.285.244 1.905-.07.923-.48 1.425-1.228 1.484-2.233z"/></svg>Go</li>
+        <li>Kafka</li>
+        <li>gRPC</li>
+        <li>Kubernetes</li>
+        <li>KEDA</li>
+        <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M22.71 13.145c-1.66 2.092-3.452 4.483-7.038 4.483-3.203 0-4.397-2.825-4.48-5.12.701 1.484 2.073 2.685 4.214 2.63 4.117-.133 6.94-3.852 6.94-7.239 0-4.05-3.022-6.972-8.268-6.972-3.752 0-8.4 1.428-11.455 3.685C2.59 6.937 3.885 9.958 4.35 9.626c2.648-1.904 4.748-3.13 6.784-3.744C8.12 9.244.886 17.05 0 18.425c.1 1.261 1.66 4.648 2.424 4.648.232 0 .431-.133.664-.365a100.49 100.49 0 0 0 5.54-6.765c.222 3.104 1.748 6.898 6.014 6.898 3.819 0 7.604-2.756 9.33-8.965.2-.764-.73-1.361-1.261-.73z"/></svg>Redis</li>
+      </ul>
+  </div>
+
+  <div class="statsbar">
+    <div class="metric"><div class="k" data-en="Calls / sec">Çağrı / sn</div><div class="v" id="mRate">0</div></div>
+    <div class="metric"><div class="k" data-en="Decisions">Kararlar</div><div class="v" id="mTotal">0</div></div>
+    <div class="metric spark"><div class="k" data-en="Fraud flagged">Fraud</div><div class="v"><span id="mAlerts">0</span> <small data-en="alerts">alarm</small></div><canvas id="spark"></canvas></div>
+  </div>
+
+  <!-- ── Console ── -->
+  <div class="grid">
+
+    <!-- Controls -->
+    <section class="panel" id="ctlPanel">
+      <header><span class="t" data-en="Decision rules">Karar kuralları</span><span class="count" data-en="3 active">3 aktif</span></header>
+      <div class="body">
+
+        <div class="rule" id="rule-velocity" style="--c:var(--velocity);--c-rgb:var(--velocity-rgb)">
+          <div class="top"><span class="rname">Velocity</span><span class="rc"><span id="c-velocity">0</span></span></div>
+          <div class="desc" data-en="Too many calls, too fast from one number — the classic SIM‑box signature.">Tek numaradan çok fazla, çok hızlı çağrı — klasik SIM‑box imzası.</div>
+          <div class="ctl"><label data-en="Max / min">Maks / dk</label><input type="range" id="s-velocity" min="4" max="40" value="14" /><output id="o-velocity">14</output></div>
+        </div>
+
+        <div class="rule" id="rule-travel" style="--c:var(--travel);--c-rgb:var(--travel-rgb)">
+          <div class="top"><span class="rname">Impossible travel</span><span class="rc"><span id="c-travel">0</span></span></div>
+          <div class="desc" data-en="Same SIM active in two cities with no time to get there — a cloned SIM.">Aynı SIM iki şehirde, aralarında gidecek zaman yok — klonlanmış SIM.</div>
+          <div class="ctl"><label data-en="Max km/h">Maks km/s</label><input type="range" id="s-travel" min="400" max="2000" step="50" value="900" /><output id="o-travel">900</output></div>
+        </div>
+
+        <div class="rule" id="rule-irsf" style="--c:var(--irsf);--c-rgb:var(--irsf-rgb)">
+          <div class="top"><span class="rname">IRSF</span><span class="rc"><span id="c-irsf">0</span></span></div>
+          <div class="desc" data-en="Premium‑destination spend spiking in a window — international revenue‑share fraud.">Bir pencerede premium‑destinasyon harcaması fırlıyor — uluslararası gelir‑paylaşımı dolandırıcılığı.</div>
+          <div class="ctl"><label data-en="Spend cap ₺">Harcama sınırı ₺</label><input type="range" id="s-irsf" min="20" max="300" step="10" value="120" /><output id="o-irsf">120</output></div>
+        </div>
+
+        <p class="subhead" data-en="Inject a scenario">Senaryo enjekte et</p>
+        <div class="injects">
+          <button class="inject" data-inj="velocity" style="--c:var(--velocity);--c-rgb:var(--velocity-rgb)">
+            <span class="ic">⇈</span><span class="lab"><b data-en="SIM‑box burst">SIM‑box serisi</b><span data-en="40 calls in seconds">saniyeler içinde 40 çağrı</span></span>
+          </button>
+          <button class="inject" data-inj="travel" style="--c:var(--travel);--c-rgb:var(--travel-rgb)">
+            <span class="ic">⇄</span><span class="lab"><b data-en="Cloned SIM">Klon SIM</b><span data-en="İstanbul → Ankara, 2 min apart">İstanbul → Ankara, 2 dk arayla</span></span>
+          </button>
+          <button class="inject" data-inj="irsf" style="--c:var(--irsf);--c-rgb:var(--irsf-rgb)">
+            <span class="ic">₺</span><span class="lab"><b data-en="IRSF spike">IRSF sıçraması</b><span data-en="premium +882 dialing">premium +882 arama</span></span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stream -->
+    <section class="panel" id="streamPanel">
+      <header><span class="t" data-en="Live CDR stream">Canlı CDR akışı</span><span class="count"><span id="streamRate">0</span> <span data-en="evt/s">olay/s</span></span></header>
+      <div class="body"><div class="stream" id="stream" aria-live="off"></div></div>
+    </section>
+
+    <!-- Alerts -->
+    <section class="panel" id="alertsPanel">
+      <header><span class="t" data-en="Fraud alerts">Fraud alarmları</span><span class="count"><span id="alertNum">0</span> <span data-en="total">toplam</span></span></header>
+      <div class="body"><div class="alerts" id="alerts"><div class="empty" data-en="— no alerts yet — streaming clean traffic —">— henüz alarm yok — temiz trafik akıyor —</div></div></div>
+    </section>
+  </div>
+
+  <!-- Geo (full width) -->
+  <section class="panel" id="geoPanel">
+    <header><span class="t" data-en="Geo · impossible travel">Coğrafya · imkânsız seyahat</span></header>
+    <div class="body" style="padding:0"><div id="geoWrap"><canvas id="geo"></canvas><span class="cap" data-en="subscriber cell locations">abone hücre konumları</span></div></div>
+  </section>
+
+  <!-- ── Footer / honesty ── -->
+  <footer>
+    <div class="disclaim">
+      <span class="tag" data-en="How it really works">Gerçekte nasıl çalışıyor</span>
+      <span class="dtext" data-en="This page runs the project's &lt;b&gt;real fraud‑rule logic&lt;/b&gt; compiled to WebAssembly, over calls generated in your browser. It is &lt;b&gt;not&lt;/b&gt; the live distributed system — there is no Kafka, Redis or microservices here; state lives in memory. In production the same rules run over a &lt;b&gt;Kafka event stream across separately‑deployable services&lt;/b&gt;, with Redis state, gRPC enrichment and KEDA autoscaling. → &lt;a href=&quot;https://github.com/ahaygun/go-cdr-fraud-detector&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;See the architecture&lt;/a&gt;">Bu sayfa projenin <b>gerçek fraud‑kural mantığını</b> WebAssembly'ye derleyip tarayıcında üretilen çağrılar üzerinde çalıştırır. Bu <b>canlı dağıtık sistem değildir</b> — burada Kafka, Redis ya da mikroservis yoktur; state bellekte tutulur. Üretimde aynı kurallar <b>ayrı ayrı deploy edilebilen servislerde bir Kafka olay akışı</b> üzerinde çalışır — Redis state, gRPC zenginleştirme ve KEDA autoscaling ile. → <a href="https://github.com/ahaygun/go-cdr-fraud-detector" target="_blank" rel="noopener">Mimariyi gör</a></span>
+    </div>
+    <div class="sig"><b>Ahmet Hasan Aygün</b><br><span data-en="Go · event-driven systems">Go · event‑driven sistemler</span><br>2026</div>
+  </footer>
+</div>
+
+<script src="wasm_exec.js"></script>
+<script>
+(function () {
+  "use strict";
+  var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var LANG = "tr";
+
+  /* ── i18n: capture the authored (TR) content, then swap on toggle ── */
+  document.querySelectorAll("[data-en]").forEach(function (el) { if (!el.hasAttribute("data-tr")) el.setAttribute("data-tr", el.innerHTML); });
+  function setLang(l) {
+    LANG = l;
+    document.querySelectorAll("[data-en]").forEach(function (el) { var v = el.getAttribute("data-" + l); if (v != null) el.innerHTML = v; });
+    document.querySelectorAll(".lang-toggle button").forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-lang") === l); });
+  }
+  document.querySelectorAll(".lang-toggle button").forEach(function (b) {
+    b.addEventListener("click", function () { setLang(b.getAttribute("data-lang")); });
+  });
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function bi(pair, cls) { return "<span" + (cls ? ' class="' + cls + '"' : "") + ' data-tr="' + esc(pair.tr) + '" data-en="' + esc(pair.en) + '">' + (LANG === "tr" ? pair.tr : pair.en) + "</span>"; }
+
+  /* ── palette toggle ── */
+  var sws = document.querySelectorAll(".theme-toggle .sw");
+  sws.forEach(function (b) {
+    b.addEventListener("click", function () {
+      var p = b.getAttribute("data-pal");
+      if (p === "ocean") document.body.setAttribute("data-palette", "ocean");
+      else document.body.removeAttribute("data-palette");
+      sws.forEach(function (x) { x.classList.toggle("is-active", x === b); });
+    });
+  });
+
+  /* ── data vocab ── */
+  var CITIES = [
+    { n: "İstanbul",   c: "CELL-IST-01", x: .15, y: .24 }, { n: "Ankara",    c: "CELL-ANK-01", x: .40, y: .44 },
+    { n: "İzmir",      c: "CELL-IZM-01", x: .08, y: .60 }, { n: "Antalya",   c: "CELL-ANT-01", x: .33, y: .82 },
+    { n: "Bursa",      c: "CELL-BUR-01", x: .19, y: .38 }, { n: "Adana",     c: "CELL-ADA-01", x: .56, y: .74 },
+    { n: "Gaziantep",  c: "CELL-GAZ-01", x: .66, y: .74 }, { n: "Konya",     c: "CELL-KON-01", x: .42, y: .66 },
+    { n: "Samsun",     c: "CELL-SAM-01", x: .58, y: .20 }, { n: "Trabzon",   c: "CELL-TRA-01", x: .76, y: .24 },
+    { n: "Diyarbakır", c: "CELL-DIY-01", x: .80, y: .64 }, { n: "Erzurum",   c: "CELL-ERZ-01", x: .88, y: .42 }
+  ];
+  var DEST = ["+90 (mobile)", "+49 Germany", "+44 UK", "+90 (fixed)", "+31 NL", "+7 Russia"];
+  var PREMIUM = ["+882 (sat)", "+881 (GMSS)", "+900 premium", "+883 TISP"];
+
+  function pick(a) { return a[(Math.random() * a.length) | 0]; }
+  function msisdn() { return "+90 5" + (30 + ((Math.random() * 6) | 0)) + " " + (100 + ((Math.random() * 900) | 0)) + " " + (10 + ((Math.random() * 90) | 0)) + (10 + ((Math.random() * 90) | 0)); }
+  function clock() { var d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0") + ":" + String(d.getSeconds()).padStart(2, "0"); }
+
+  var RULES = { velocity: 0, travel: 0, irsf: 0 };
+  var thresholds = { velocity: 14, travel: 900, irsf: 120 };
+  var RNAME = { velocity: "Velocity", impossible_travel: "Impossible travel", irsf: "IRSF" };
+  var RCOLOR = { velocity: "velocity", impossible_travel: "travel", irsf: "irsf" }; // engine rule id → CSS/color key
+  function pushConfig() { if (window.cdrConfigure) window.cdrConfigure(thresholds.velocity, thresholds.travel, thresholds.irsf); }
+
+  ["velocity", "travel", "irsf"].forEach(function (k) {
+    var s = document.getElementById("s-" + k), o = document.getElementById("o-" + k);
+    function upd() {
+      thresholds[k] = +s.value;
+      o.textContent = s.value;
+      var pct = ((s.value - s.min) / (s.max - s.min)) * 100;
+      s.style.setProperty("--fill", pct + "%");
+      pushConfig();
+    }
+    s.addEventListener("input", upd); upd();
+  });
+
+  var stream = document.getElementById("stream");
+  var totals = { processed: 0, alerts: 0 }, rateWin = [], sparkData = [];
+
+  function addRow(o) {
+    var row = document.createElement("div");
+    row.className = "row" + (o.flag ? " flag" : "");
+    if (o.flag) row.style.setProperty("--c-rgb", "var(--" + o.rule + "-rgb)");
+    var st = o.flag
+      ? '<span class="st">' + o.rule + "</span>"
+      : '<span class="st clear" data-tr="temiz" data-en="clear">' + (LANG === "tr" ? "temiz" : "clear") + "</span>";
+    row.innerHTML =
+      '<span class="ts">' + clock() + "</span>" +
+      '<span class="msisdn">' + o.from + "</span>" +
+      '<span class="meta"><b>' + o.city + "</b> → " + o.dest + " · " + o.dur + "s</span>" + st;
+    stream.insertBefore(row, stream.firstChild);
+    while (stream.children.length > 18) stream.removeChild(stream.lastChild);
+    totals.processed++;
+    document.getElementById("mTotal").textContent = totals.processed.toLocaleString("en-US");
+    rateWin.push(performance.now());
+  }
+
+  // ── real engine plumbing ──────────────────────────────────────────────
+  // A recurring subscriber pool (each with a home cell) — the generator role.
+  var SUBS = [];
+  (function () { for (var i = 0; i < 24; i++) SUBS.push({ m: msisdn(), home: pick(CITIES) }); })();
+  var seq = 0;
+  function nid() { return "rec-" + (seq++); }
+  function iso(offMs) { return new Date(Date.now() + (offMs || 0)).toISOString(); }
+
+  // render one real fraud alert (from the WASM engine) into the timeline
+  function addAlert(al, ctx) {
+    var ck = RCOLOR[al.rule] || "velocity";
+    RULES[ck]++;
+    totals.alerts++;
+    document.getElementById("c-" + ck).textContent = RULES[ck];
+    document.getElementById("mAlerts").textContent = totals.alerts;
+    document.getElementById("alertNum").textContent = totals.alerts;
+    sparkData.push(totals.alerts); if (sparkData.length > 60) sparkData.shift();
+
+    var rc = document.getElementById("rule-" + ck);
+    rc.classList.add("fire"); setTimeout(function () { rc.classList.remove("fire"); }, 900);
+
+    var box = document.getElementById("alerts");
+    var e = box.querySelector(".empty"); if (e) box.removeChild(e);
+    var a = document.createElement("div");
+    a.className = "alert";
+    a.style.setProperty("--c", "var(--" + ck + ")");
+    a.style.setProperty("--c-rgb", "var(--" + ck + "-rgb)");
+    var scoreTxt = (LANG === "tr" ? "skor " : "score ") + "×" + (Math.round(al.score * 10) / 10);
+    a.innerHTML =
+      '<div class="ah"><span class="rn">' + (RNAME[al.rule] || al.rule) + "</span>" +
+        '<span class="sc">' + scoreTxt + "</span></div>" +
+      '<div class="reason">' + al.evidence + "</div>" +
+      '<div class="amsi"><span>' + al.caller_msisdn + "</span><span>" + (ctx && ctx.city ? ctx.city : "") + "</span></div>";
+    box.insertBefore(a, box.firstChild);
+    while (box.children.length > 6) box.removeChild(box.lastChild);
+  }
+
+  // feed one CDR to the real engine (WASM) and render the row + any alerts it returns
+  function feed(sub, city, callee, dur, offMs) {
+    var rec = {
+      record_id: nid(), caller_msisdn: sub.m, callee_msisdn: callee,
+      start_time: iso(offMs), duration_sec: dur, cell_id: city.c, call_type: "VOICE"
+    };
+    var alerts = [];
+    try { alerts = JSON.parse(window.cdrScore(JSON.stringify(rec)) || "[]"); } catch (e) { alerts = []; }
+    var flag = alerts.length ? RCOLOR[alerts[0].rule] : null;
+    addRow({ from: sub.m, city: city.n, dest: callee, dur: dur, flag: !!flag, rule: flag });
+    for (var i = 0; i < alerts.length; i++) addAlert(alerts[i], { city: city.n, dest: callee });
+  }
+
+  // background traffic — mostly clean; the real engine decides what is fraud
+  function tick() {
+    var n = 1 + ((Math.random() * 3) | 0);
+    for (var i = 0; i < n; i++) {
+      var sub = pick(SUBS);
+      var premium = Math.random() < 0.05;
+      var callee = premium ? pick(PREMIUM) : pick(DEST);
+      feed(sub, sub.home, callee, 1 + ((Math.random() * 240) | 0));
+    }
+  }
+
+  document.querySelectorAll(".inject").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var t = b.getAttribute("data-inj");
+      if (t === "velocity") {
+        var sub = { m: msisdn(), home: pick(CITIES) }; // a fresh SIM-box number, one cell
+        for (var i = 0; i < 20; i++) (function (i) { setTimeout(function () {
+          feed(sub, sub.home, pick(DEST), 1 + ((Math.random() * 6) | 0));
+        }, i * 45 * (reduced ? 0 : 1)); })(i);
+      } else if (t === "travel") {
+        var sub2 = { m: msisdn() };
+        var a = CITIES[0], z = CITIES[1]; // İstanbul → Ankara (capital)
+        feed(sub2, a, "+90 (mobile)", 42, -120000); // first call, 2 min ago (İstanbul)
+        setTimeout(function () {
+          feed(sub2, z, "+90 (mobile)", 18, 0);      // now (Diyarbakır) → impossible speed
+          drawArc(a, z);
+        }, reduced ? 0 : 640);
+      } else {
+        var sub3 = { m: msisdn(), home: CITIES[0] };
+        for (var j = 0; j < 6; j++) (function (j) { setTimeout(function () {
+          feed(sub3, sub3.home, pick(PREMIUM), 200 + ((Math.random() * 220) | 0));
+        }, j * 120 * (reduced ? 0 : 1)); })(j);
+      }
+    });
+  });
+
+  setInterval(function () {
+    var now = performance.now();
+    rateWin = rateWin.filter(function (t) { return now - t < 1000; });
+    document.getElementById("mRate").textContent = rateWin.length;
+    document.getElementById("streamRate").textContent = rateWin.length;
+    drawSpark();
+  }, 500);
+
+  var sc = document.getElementById("spark"), sx = sc.getContext("2d");
+  function drawSpark() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1), w = sc.clientWidth, h = sc.clientHeight;
+    sc.width = w * dpr; sc.height = h * dpr; sx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    sx.clearRect(0, 0, w, h);
+    if (sparkData.length < 2) return;
+    var max = Math.max.apply(null, sparkData) || 1, n = sparkData.length, step = w / (n - 1);
+    var accent = getComputedStyle(document.body).getPropertyValue("--accent").trim();
+    sx.beginPath();
+    for (var i = 0; i < n; i++) { var x = i * step, y = h - 3 - (sparkData[i] / max) * (h - 8); i ? sx.lineTo(x, y) : sx.moveTo(x, y); }
+    sx.lineTo(w, h); sx.lineTo(0, h); sx.closePath();
+    var g = sx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, hexA(accent, .34)); g.addColorStop(1, hexA(accent, 0));
+    sx.fillStyle = g; sx.fill();
+    sx.beginPath();
+    for (var k = 0; k < n; k++) { var xx = k * step, yy = h - 3 - (sparkData[k] / max) * (h - 8); k ? sx.lineTo(xx, yy) : sx.moveTo(xx, yy); }
+    sx.strokeStyle = accent; sx.lineWidth = 1.5; sx.stroke();
+    var ex = (n - 1) * step, ey = h - 3 - (sparkData[n - 1] / max) * (h - 8);
+    sx.beginPath(); sx.arc(ex, ey, 2.4, 0, 7); sx.fillStyle = accent; sx.fill();
+  }
+  function hexA(hex, a) { hex = hex.trim().replace("#", ""); if (hex.length === 3) hex = hex.split("").map(function (c) { return c + c; }).join(""); var n = parseInt(hex, 16); return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")"; }
+
+  var geo = document.getElementById("geo"), gx = geo.getContext("2d"), arcs = [], gW = 0, gH = 0;
+  function geoSize() { var dpr = Math.min(2, window.devicePixelRatio || 1); gW = geo.clientWidth; gH = geo.clientHeight; geo.width = gW * dpr; geo.height = gH * dpr; gx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+  function drawArc(a, z) { arcs.push({ a: a, z: z, t: 0 }); }
+  function drawGeo() {
+    var w = gW, h = gH, pad = 18;
+    gx.clearRect(0, 0, w, h);
+    var band = Math.min(w - 2 * pad, 880), ox = (w - band) / 2;
+    function P(c) { return { x: ox + c.x * band, y: pad + c.y * (h - 2 * pad) }; }
+    var line = getComputedStyle(document.body).getPropertyValue("--line-2").trim();
+    var travel = getComputedStyle(document.body).getPropertyValue("--travel").trim();
+    var ink = getComputedStyle(document.body).getPropertyValue("--muted").trim();
+    gx.strokeStyle = hexA(line, .5); gx.lineWidth = 1;
+    for (var i = 0; i < CITIES.length; i++) for (var j = i + 1; j < CITIES.length; j++) {
+      var pa = P(CITIES[i]), pb = P(CITIES[j]), dx = pa.x - pb.x, dy = pa.y - pb.y;
+      if (dx * dx + dy * dy < (band * 0.30) * (band * 0.30)) { gx.beginPath(); gx.moveTo(pa.x, pa.y); gx.lineTo(pb.x, pb.y); gx.stroke(); }
+    }
+    gx.font = "500 9.5px " + getComputedStyle(document.body).getPropertyValue("--mono"); gx.textAlign = "center";
+    for (var n = 0; n < CITIES.length; n++) { var p = P(CITIES[n]); gx.beginPath(); gx.arc(p.x, p.y, 2.8, 0, 7); gx.fillStyle = ink; gx.fill(); gx.fillStyle = hexA(ink, .8); gx.fillText(CITIES[n].n, p.x, p.y + 15); }
+    while (arcs.length > 2) arcs.shift();
+    for (var k = 0; k < arcs.length; k++) {
+      var arc = arcs[k], pa2 = P(arc.a), pb2 = P(arc.z);
+      if (arc.t < 1.6) arc.t += 0.02; if (arc.t > 1.6) arc.t = 1.6;
+      var prog = Math.min(arc.t, 1), mx = (pa2.x + pb2.x) / 2, my = (pa2.y + pb2.y) / 2 - Math.abs(pb2.x - pa2.x) * 0.28;
+      var alpha = arc.t > 1 ? Math.max(0.32, (1.6 - arc.t) / 0.6) : 1;
+      gx.beginPath(); gx.moveTo(pa2.x, pa2.y);
+      var steps = 44;
+      for (var t = 1; t <= steps * prog; t++) { var u = t / steps, xx = (1 - u) * (1 - u) * pa2.x + 2 * (1 - u) * u * mx + u * u * pb2.x, yy = (1 - u) * (1 - u) * pa2.y + 2 * (1 - u) * u * my + u * u * pb2.y; gx.lineTo(xx, yy); }
+      gx.strokeStyle = hexA(travel, alpha); gx.lineWidth = 2; gx.stroke();
+      [pa2, pb2].forEach(function (pp) { gx.beginPath(); gx.arc(pp.x, pp.y, 4, 0, 7); gx.fillStyle = travel; gx.fill(); gx.beginPath(); gx.arc(pp.x, pp.y, 7, 0, 7); gx.strokeStyle = hexA(travel, alpha * .4); gx.lineWidth = 1; gx.stroke(); });
+      // endpoint city names are drawn once by the node loop; the pink dots mark them here
+    }
+    requestAnimationFrame(drawGeo);
+  }
+
+  geoSize();
+  drawGeo();
+  drawSpark();
+  window.addEventListener("resize", function () { geoSize(); drawSpark(); });
+
+  // The WASM engine calls window.onWasmReady once its exported functions are live.
+  function startEngine() {
+    pushConfig();
+    for (var i = 0; i < 16; i++) { var s = pick(SUBS); feed(s, s.home, pick(DEST), 1 + ((Math.random() * 200) | 0)); }
+    if (!reduced) {
+      setInterval(tick, 850);
+      setTimeout(function () { document.querySelector('[data-inj="travel"]').click(); }, 1800);
+      // auto-inject a scenario now and then, like the real generator service injects on a timer
+      setInterval(function () { var bs = document.querySelectorAll(".inject"); bs[(Math.random() * bs.length) | 0].click(); }, 11000);
+    }
+  }
+  window.onWasmReady = startEngine;
+})();
+</script>
+<script>
+  // Load and start the Go→WebAssembly fraud engine (defines window.cdrScore etc.).
+  (function () {
+    if (typeof Go === "undefined") { console.error("wasm_exec.js not loaded"); return; }
+    var go = new Go();
+    function run(res) { go.run(res.instance); }
+    function fallback() {
+      fetch("main.wasm").then(function (r) { return r.arrayBuffer(); })
+        .then(function (b) { return WebAssembly.instantiate(b, go.importObject); })
+        .then(run).catch(function (e) { console.error("wasm load failed", e); });
+    }
+    if (WebAssembly.instantiateStreaming) {
+      WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject).then(run).catch(fallback);
+    } else { fallback(); }
+  })();
+</script>
