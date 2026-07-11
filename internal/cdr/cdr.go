@@ -13,6 +13,7 @@ import (
 const (
 	TopicRaw   = "cdr.raw"
 	TopicAlert = "cdr.fraud.alert"
+	TopicDLQ   = "cdr.dlq"
 
 	RuleVelocity         = "velocity"
 	RuleImpossibleTravel = "impossible_travel"

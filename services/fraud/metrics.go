@@ -20,4 +20,8 @@ var (
 		Help:    "Latency from CDR production to fraud processing completion.",
 		Buckets: prometheus.ExponentialBuckets(0.001, 2, 14), // 1ms .. ~8s
 	})
+	deadLettered = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cdr_dead_lettered_total",
+		Help: "Total CDR records routed to the dead-letter topic after exhausting retries.",
+	})
 )

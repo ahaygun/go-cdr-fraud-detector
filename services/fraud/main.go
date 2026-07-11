@@ -58,17 +58,23 @@ func main() {
 	}
 	alertCooldown := time.Duration(atoi(platform.Getenv("ALERT_COOLDOWN_SEC", "60"))) * time.Second
 	refCacheTTL := time.Duration(atoi(platform.Getenv("REFERENCE_CACHE_TTL_SEC", "300"))) * time.Second
+	maxAttempts := atoi(platform.Getenv("MAX_ATTEMPTS", "5"))
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
 
 	log.Info("starting", "kafka_brokers", brokers, "redis_addr", redisAddr,
 		"subscriber_addr", subscriberAddr, "velocity_threshold", vel.Threshold,
 		"impossible_travel_max_kmh", travel.MaxSpeedKmh, "irsf_threshold", irsf.SpendThreshold,
-		"alert_cooldown", alertCooldown.String(), "reference_cache_ttl", refCacheTTL.String())
+		"alert_cooldown", alertCooldown.String(), "reference_cache_ttl", refCacheTTL.String(),
+		"max_attempts", maxAttempts)
 
 	go platform.ServeMetrics(ctx, platform.Getenv("METRICS_ADDR", ":9100"), log)
 
 	if err := stream.EnsureTopics(ctx, brokers,
 		stream.TopicSpec{Name: cdr.TopicRaw, Partitions: 3},
 		stream.TopicSpec{Name: cdr.TopicAlert, Partitions: 3},
+		stream.TopicSpec{Name: cdr.TopicDLQ, Partitions: 1},
 	); err != nil {
 		log.Error("ensure topics failed", "err", err)
 		return
@@ -89,6 +95,8 @@ func main() {
 	defer reader.Close()
 	writer := stream.NewWriter(brokers, cdr.TopicAlert)
 	defer writer.Close()
+	dlqWriter := stream.NewWriter(brokers, cdr.TopicDLQ)
+	defer dlqWriter.Close()
 
 	p := &processor{
 		log:           log,
@@ -104,6 +112,9 @@ func main() {
 		alertCooldown: alertCooldown,
 		cellCache:     newRefCache[cellGeo](refCacheTTL),
 		tariffCache:   newRefCache[tariffInfo](refCacheTTL),
+		dlqWriter:     dlqWriter,
+		maxAttempts:   maxAttempts,
+		retryBackoff:  time.Second,
 	}
 
 	log.Info("consuming", "topic", cdr.TopicRaw)
@@ -118,19 +129,10 @@ func main() {
 			continue
 		}
 
-		for { // retry until processed; processing is idempotent
-			if err := p.handle(ctx, m.Value); err == nil {
-				break
-			} else if ctx.Err() != nil {
-				return
-			} else {
-				log.Error("process failed; retrying", "err", err)
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(time.Second):
-				}
-			}
+		// Bounded retries; a record that can never be processed is dead-lettered
+		// so one poison message cannot block the partition forever.
+		if !p.runWithRetry(ctx, m.Value, p.handle) {
+			continue // left uncommitted → redelivered later (dead-letter write failed, or shutting down)
 		}
 		cdrProcessed.Inc()
 
@@ -144,7 +146,7 @@ type processor struct {
 	log           *slog.Logger
 	rdb           *redis.Client
 	ref           cdrv1.ReferenceClient
-	writer        *kafka.Writer
+	writer        msgWriter
 	vel           rules.Velocity
 	travel        rules.ImpossibleTravel
 	irsf          rules.IRSF
@@ -154,6 +156,9 @@ type processor struct {
 	alertCooldown time.Duration
 	cellCache     *refCache[cellGeo]
 	tariffCache   *refCache[tariffInfo]
+	dlqWriter     msgWriter
+	maxAttempts   int
+	retryBackoff  time.Duration
 }
 
 func (p *processor) handle(ctx context.Context, value []byte) error {
